@@ -5,6 +5,7 @@ from io import BytesIO
 import matplotlib.pyplot as plt
 # from skimage.external.tifffile import imsave
 from tifffile import imsave as imsave
+from tifffile import imread as imread
 
 import warnings
 
@@ -92,6 +93,17 @@ class ImgFrmt:
 
 def nan_if(arr, value):
     return np.where(arr == value, np.nan, arr)
+
+
+def load_tiff_stack_zyx(filepath):
+    '''
+    input: filepath
+    output: data, shape
+    load tifffile from filepath and move axis to (z, y, x)
+    return data and shape '''
+    data = imread(filepath) # (z, y, x)
+    shape = data.shape
+    return data, shape
 
 
 def plot_map_and_save(matrix, np_filename, dest_path, res_xy, res_z, shape_G, shape_P,

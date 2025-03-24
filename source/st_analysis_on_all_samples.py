@@ -91,4 +91,17 @@ if __name__ == '__main__':
 
     main(parser)
 
+    # TODO:
+    '''
+    - --- devo fare un porgramma solo che fa la STA! non ha senso Whole_heart e pig_analysis separato... decidere quale usare e pulire quello 
+    - sistemare st_analysi_on_all_samples per prendere anche una lista di path oltre che la cartella madre
+    - pulire st_analysis.py per prendere FA e GEOM_SHAPE come paramemtri da param file, 
+    --- salvare (dentro R?) per ogni p -> l'intensità media e la FA -> così poi posso filtrare la FA per intensità
+    --- la media delle FA dei cubetti analizzati 
+    - eseguire o no il plot_dei_quiver in base a un param in ingresso come in PIG_analysis (prendo da pig_analysis?)
+
+    '''
+
+
+
 
