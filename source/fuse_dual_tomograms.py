@@ -124,7 +124,7 @@ def calculate_sharpness(image, _plot=False, _verb=False):
     return sharpness
 
 
-def evaluate_snr_of_xy_frame(frame, _segm=True, _plot=False, _verb=False):
+def evaluate_snr_of_xy_frame(frame, _segm=True, radius=0.2, _plot=False, _verb=False):
     '''
     Evaluate contrast on a single xy frame of the tomogram
     :param frame: numpy array of the frame (y, x)
@@ -142,7 +142,7 @@ def evaluate_snr_of_xy_frame(frame, _segm=True, _plot=False, _verb=False):
     # Calculate SNR based on high frequency content
     # snr_image = calculate_snr_high_freq(frame, _plot=_plot, _verb=_verb)
     # snr_image = calculate_sharpness(frame, _plot=_plot, _verb=_verb)
-    snr_image = calculate_snr_by_high_low_freq_ratio(frame, radius_ratio=0.1, _plot=_plot, _verb=_verb)
+    snr_image = calculate_snr_by_high_low_freq_ratio(frame, radius_ratio=radius, _plot=_plot, _verb=_verb)
 
     # Normalize on the area of the mask
     if _segm:
@@ -265,7 +265,7 @@ def plot_snr(xl, yl, xlabel, ylabel, title):
     return None
 
 
-def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_step=10, _plot=False, _verb=False):
+def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_step=10, radius=0.2, _plot=False, _verb=False):
     '''
     Evaluate snr on xy frames (every z_step frames) of the tomogram and return a list of contrast values
     :param tomogram: numpy array of the tomogram (z, y, x)
@@ -294,15 +294,17 @@ def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_step=10, 
     print('Selected z values: ', list(z_selected))
 
     for z in z_selected:
-        print('Evaluating SNR at z={}...'.format(z))
-        snr_image_values[z], snr_sample_values[z] = evaluate_snr_of_xy_frame(tomogram[z], _segm=_segm, _plot=_plot, _verb=_verb)
-        print('  > SNR_image: {}'.format(snr_image_values[z]))
-        print('  > SNR_sample: {}\n'.format(snr_sample_values[z]))
+        print(' - z = {}'.format(z))
+        # print('Evaluating SNR at z={}...'.format(z))
+        snr_image_values[z], snr_sample_values[z] = evaluate_snr_of_xy_frame(tomogram[z], _segm=_segm, radius=radius, _plot=_plot, _verb=_verb)
+        # print('  > SNR_image: {}'.format(snr_image_values[z]))
+        # print('  > SNR_sample: {}\n'.format(snr_sample_values[z]))
 
     return snr_image_values, snr_sample_values
 
 
-def plot_snrs_dual(snr_1, snr_2, _log=False, _segm=False, xlabel='x', ylabel='y', labels=('snr1', 'snr21'), title='title'):
+def plot_snrs_dual(snr_1, snr_2, _log=False, _segm=False, xlabel='x', ylabel='y',
+                   labels=('snr1', 'snr21'), title='title', _save=False, _output_dirpath=None, fname=None):
 
     # check if all the list has the same lentgh
     if not len(snr_1) == len(snr_2):
@@ -313,6 +315,7 @@ def plot_snrs_dual(snr_1, snr_2, _log=False, _segm=False, xlabel='x', ylabel='y'
         snr_1 = {k: 10 * np.log10(v) for k, v in snr_1.items()}
         snr_2 = {k: 10 * np.log10(v) for k, v in snr_2.items()}
 
+    # prepare figure and plot data
     plt.figure(figsize=(20, 10))
     plt.plot(snr_1.keys(), snr_1.values(), 'o-', color='b', label=labels[0])
     if _segm:
@@ -327,7 +330,13 @@ def plot_snrs_dual(snr_1, snr_2, _log=False, _segm=False, xlabel='x', ylabel='y'
     # increase number of x ticks
     plt.xticks(np.arange(min(snr_1.keys()), max(snr_1.keys())+1, 5))
 
+    if _save:
+        plt.savefig(os.path.join(_output_dirpath, fname))
+
+    # show plot
     plt.show()
+
+
     return None
 
 def main(parser):
@@ -437,41 +446,51 @@ def main(parser):
 
     # ===============================================================================================
     # ============================================= FUSION ==========================================
+    # TODO: add info to reports txt
     # ===============================================================================================
-    _plot = False
-    _verb = False
+    _plot             = False
+    _save_final_plots = True
+    _verb             = False
 
-    _segm = True
+    _segm  = False
     z_step = 1
+    radius = 0.1
 
-    L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, _plot=_plot, _verb=_verb)
-    R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, _plot=_plot, _verb=_verb)
+    for radius in [0.1, 0.2, 0.3, 0.4, 0.5]:
+        print(Bcolors.OKBLUE + '\n\n*** Evaluating SNR with radius ratio: {} '.format(radius) + Bcolors.ENDC)
+        L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, radius=radius, _plot=_plot, _verb=_verb)
+        R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, radius=radius, _plot=_plot, _verb=_verb)
 
-    # double tomogram, double snr
-    plot_snrs_dual(L_snr_image, R_snr_image, _log=False, _segm=False, xlabel='Z', ylabel='SNR',
-                   labels=('LeftCAM SNR (Image - no segm)', 'RightCAM SNR (Image - no segm)'),
-                   title='SNR along Z - step: {}; FFT ratio 0.2'.format(z_step))
+        # double tomogram, double snr
+        # plot_snrs_dual(L_snr_image, R_snr_image, _log=False, _segm=False, xlabel='Z', ylabel='SNR',
+        #                labels=('LeftCAM SNR (Image - no segm)', 'RightCAM SNR (Image - no segm)'),
+        #                title='SNR along Z - step: {}; FFT ratio: {}'.format(z_step, radius),
+        #                _save=_save_final_plots, _output_dirpath=output_dirpath,
+        #                fname='snr_no_segm_step{}_radius{}.png'.format(z_step, radius))
 
-    #plot log
-    plot_snrs_dual(L_snr_image, R_snr_image, _log=True, _segm=False, xlabel='Z', ylabel='SNR',
-                   labels=('LeftCAM SNR (Image - no segm)', 'RightCAM SNR (Image - no segm)'),
-                   title='Log10(SNR) along Z - step: {}; FFT ratio 0.2'.format(z_step))
+        #plot log
+        plot_snrs_dual(L_snr_image, R_snr_image, _log=True, _segm=False, xlabel='Z', ylabel='SNR',
+                       labels=('LeftCAM SNR (Image - no segm)', 'RightCAM SNR (Image - no segm)'),
+                       title='Log10(SNR) along Z - step: {}; FFT ratio: {}'.format(z_step, radius),
+                       _save=_save_final_plots, _output_dirpath=output_dirpath,
+                       fname='log10_snr_no_segm_step{}_radius{}.png'.format(z_step, radius))
 
-    # plot_snrs_dual(L_snr_image, L_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR',
-    #                labels=('LeftCAM SNR (Image - no segm)', 'LeftCAM SNR (Sample - segmented)'),
-    #                title='LeftCAM - SNR along Z - step: {}; FFT ratio 0.2'.format(z_step))
-    #
-    # plot_snrs_dual(R_snr_image, R_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR',
-    #                  labels=('RightCAM SNR (Image - no segm)', 'RightCAM SNR (Sample - segmented)'),
-    #                  title='RightCAM - SNR along Z - step: {}; FFT ratio 0.2'.format(z_step))
+        # plot_snrs_dual(L_snr_image, L_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR',
+        #                labels=('LeftCAM SNR (Image - no segm)', 'LeftCAM SNR (Sample - segmented)'),
+        #                title='LeftCAM - SNR along Z - step: {}; FFT ratio 0.2'.format(z_step))
+        #
+        # plot_snrs_dual(R_snr_image, R_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR',
+        #                  labels=('RightCAM SNR (Image - no segm)', 'RightCAM SNR (Sample - segmented)'),
+        #                  title='RightCAM - SNR along Z - step: {}; FFT ratio 0.2'.format(z_step))
 
-
-
-    # save results in a file
-    with open(os.path.join(output_dirpath, 'L_snr_image.txt'), 'w') as file:
-        json.dump(L_snr_image, file)
-    with open(os.path.join(output_dirpath, 'R_snr_image.txt'), 'w') as file:
-        json.dump(R_snr_image, file)
+        # save results in a file
+        snr_values_out_path = os.path.join(output_dirpath, 'snr_values')
+        if not os.path.exists(snr_values_out_path):
+            os.makedirs(snr_values_out_path)
+        with open(os.path.join(snr_values_out_path, 'L_snr_image_radius{}_zstep{}.txt'.format(radius, z_step)), 'w') as file:
+            json.dump(L_snr_image, file)
+        with open(os.path.join(snr_values_out_path, 'R_snr_image_radius{}_zstep{}.txt'.format(radius, z_step)), 'w') as file:
+            json.dump(R_snr_image, file)
 
 
 
