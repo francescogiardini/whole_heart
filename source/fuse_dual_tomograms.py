@@ -1,6 +1,8 @@
 import os
 import argparse
+import json
 
+from matplotlib.pyplot import xlabel
 from scipy.fft import fft2, ifft2, fftshift
 import numpy as np
 from skimage.filters import threshold_otsu
@@ -40,6 +42,7 @@ def segment_backround_otsu(image):
     """
     # Calculate Otsu's threshold
     threshold = threshold_otsu(image)
+    # print('Otsu threshold:', threshold)
 
     # Create a binary mask where pixels above the threshold are set to 0 (foreground)
     # and pixels below the threshold are set to 1 (background)
@@ -88,25 +91,70 @@ def crop_fov(tomogram, fov_portion, axis=1):
     else:
         raise ValueError('Invalid axis value. axis must be 1 (y, row) or 2 (x, column)')
 
+# calculate the area of the binary mask
+def area_of_mask(mask):
+    '''
+    Calculate the area of the binary mask
+    :param mask: numpy array of the binary mask
+    :return: area of the mask
+    '''
+    return np.sum(mask)
 
-def evaluate_snr_of_xy_frame(frame, _segm=True):
+
+def calculate_sharpness(image, _plot=False, _verb=False):
+    """
+    Calculate the sharpness of an image using the gradient of the image.
+
+    :param image: numpy array of the image
+    :return: sharpness value
+    """
+    # Calculate the gradient of the image
+    gradient_x = np.gradient(image, axis=1)
+    gradient_y = np.gradient(image, axis=0)
+    gradient = np.sqrt(gradient_x ** 2 + gradient_y ** 2)
+
+    # Calculate the sharpness as the mean of the gradient
+    sharpness = np.mean(gradient)
+
+    if _plot:
+        plot_grayscale_image(gradient_x, title='Gradient X', vmin=0, vmax=np.max(gradient_x))
+        plot_grayscale_image(gradient_y, title='Gradient Y', vmin=0, vmax=np.max(gradient_y))
+        plot_grayscale_image(gradient, title='Gradient', vmin=0, vmax=np.max(gradient))
+
+    return sharpness
+
+
+def evaluate_snr_of_xy_frame(frame, _segm=True, _plot=False, _verb=False):
     '''
     Evaluate contrast on a single xy frame of the tomogram
     :param frame: numpy array of the frame (y, x)
     :param _segm: if True, evaluate contrast only on the segmentation of the sample
     :return: contrast value
     '''
+    if _plot: plot_grayscale_image(frame, title='Original Frame', vmin=0, vmax=np.max(frame))
+
     if _segm:
         background_mask = segment_backround_otsu(frame)
+        if _plot: plot_grayscale_image(background_mask, title='Background Mask', vmin=0, vmax=1)
         frame[background_mask] = 0
+        if _plot: plot_grayscale_image(frame, title='Masked Frame', vmin=0, vmax=np.max(frame))
 
-    snr = calculate_snr_high_freq(frame)
-    snr = (np.max(frame) - np.min(frame)) / (np.max(frame) + np.min(frame))
+    # Calculate SNR based on high frequency content
+    # snr_image = calculate_snr_high_freq(frame, _plot=_plot, _verb=_verb)
+    # snr_image = calculate_sharpness(frame, _plot=_plot, _verb=_verb)
+    snr_image = calculate_snr_by_high_low_freq_ratio(frame, radius_ratio=0.1, _plot=_plot, _verb=_verb)
 
-    return snr
+    # Normalize on the area of the mask
+    if _segm:
+        area = area_of_mask(background_mask)
+        # print('Area of the mask: ', area)
+        snr_sample = snr_image / area if _segm else snr_image
+        return snr_image, snr_sample
+
+    return snr_image, snr_image
 
 
-def calculate_snr_high_freq(image):
+def calculate_snr_by_high_low_freq_ratio(image, radius_ratio=0.5, _plot=False, _verb=False):
     """
     Calculate the Signal-to-Noise Ratio (SNR) based on high frequency content of an image.
 
@@ -116,26 +164,108 @@ def calculate_snr_high_freq(image):
     # Perform Fourier transform
     f_transform = fft2(image)
     f_transform_shifted = fftshift(f_transform)
+    if _verb:
+        print("f_transform_shifted.shape:. ", f_transform_shifted.shape)
+        print("max of f_transform_shifted:. ", np.max(f_transform_shifted))
 
     # Calculate the magnitude spectrum
     magnitude_spectrum = np.abs(f_transform_shifted)
+    log_magnitude_spectrum = np.log1p(magnitude_spectrum)  # Use log1p to avoid log(0)
+    if _verb: print("max of log_magnitude_spectrum: ", np.max(log_magnitude_spectrum))
+    if _plot: plot_grayscale_image(log_magnitude_spectrum, title='Log Magnitude Spectrum', vmin=0,
+                                   vmax=np.max(log_magnitude_spectrum))
 
-    # Define a threshold to separate high frequencies
-    threshold = np.percentile(magnitude_spectrum, 95)
+    # Create a circular mask to exclude low frequencies
+    rows, cols = image.shape
+    center_row, center_col = rows // 2, cols // 2
+    Y, X = np.ogrid[:rows, :cols]
+    distance_from_center = np.sqrt((X - center_col) ** 2 + (Y - center_row) ** 2)
+    radius = radius_ratio * min(center_row, center_col)
+    high_freq_mask = distance_from_center > radius
+    if _plot: plot_grayscale_image(high_freq_mask, title='High Frequencies Mask', vmin=0, vmax=1)
 
     # Calculate the energy of high frequencies
-    high_freq_energy = np.sum(magnitude_spectrum[magnitude_spectrum > threshold] ** 2)
+    high_freq_energy = np.sum(magnitude_spectrum[high_freq_mask] ** 2)
 
     # Calculate the total energy of the image
     total_energy = np.sum(magnitude_spectrum ** 2)
 
     # Calculate SNR
     snr = high_freq_energy / total_energy
-
     return snr
 
 
-def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_step=10, _plot=False):
+def calculate_snr_high_freq(image, _plot=False, _verb=False):
+    """
+    Calculate the Signal-to-Noise Ratio (SNR) based on high frequency content of an image.
+
+    :param image: numpy array of the image
+    :return: SNR value
+    """
+    # Perform Fourier transform
+    f_transform = fft2(image)
+    f_transform_shifted = fftshift(f_transform)
+    if _verb:
+        print("f_transform_shifted.shape:. ", f_transform_shifted.shape)
+        print("max of f_transform_shifted:. ", np.max(f_transform_shifted))
+
+    # Calculate the magnitude spectrum
+    magnitude_spectrum = np.abs(f_transform_shifted)
+    if _verb: print("max of magnitude_spectrum:. ", np.max(magnitude_spectrum))
+    if _plot: plot_grayscale_image(magnitude_spectrum, title='Magnitude Spectrum', vmin=0, vmax=np.max(magnitude_spectrum))
+
+    # Define a threshold to separate high frequencies
+    threshold = np.percentile(magnitude_spectrum, 95)
+    if _verb: print("high-freq threshold on magnitude_spectrum:. ", threshold)
+
+    # Calculate the energy of high frequencies
+    high_freq_energy = np.sum(magnitude_spectrum[magnitude_spectrum > threshold] ** 2)
+    if _verb: print("high_freq_energy:. ", high_freq_energy)
+    if _plot: plot_grayscale_image(magnitude_spectrum > threshold, title='High Frequencies Mask', vmin=0, vmax=1)
+
+    # Calculate the total energy of the image
+    total_energy = np.sum(magnitude_spectrum ** 2)
+    if _verb: print("total_energy:. ", total_energy)
+
+    # Calculate SNR
+    snr = high_freq_energy / total_energy
+    return snr
+
+
+def plot_snrs(xl, yl, xr, yr, xlabel, ylabel, title):
+
+    # check if all the list has the same lentgh
+    if not len(xl) == len(yl) == len(xr) == len(yr):
+        raise ValueError('All the lists must have the same length')
+
+    # plot (xl, yl) and (xr, yr) with different colors
+    plt.figure(figsize=(10, 10))
+    plt.plot(xl, yl, 'r', label='Left Cam')
+    plt.plot(xr, yr, 'b', label='Right Cam')
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.legend()
+    plt.show()
+    return None
+
+
+def plot_snr(xl, yl, xlabel, ylabel, title):
+
+    # check if all the list has the same lentgh
+    if not len(xl) == len(yl):
+        raise ValueError('All the lists must have the same length')
+
+    plt.figure(figsize=(10, 10))
+    plt.plot(xl, yl, 'o-')
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.show()
+    return None
+
+
+def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_step=10, _plot=False, _verb=False):
     '''
     Evaluate snr on xy frames (every z_step frames) of the tomogram and return a list of contrast values
     :param tomogram: numpy array of the tomogram (z, y, x)
@@ -147,30 +277,63 @@ def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_step=10, 
     :return: list of contrast values
     '''
 
-    # TODO - cambiare per iterare su tutti
-    temp_z = int(tomogram.shape[0]/2)
-
-    if _plot: plot_grayscale_image(tomogram[temp_z], title='Before Cropping Fov', vmin=0, vmax=255)
+    # just for visualization before and after cropping step
+    z_half = int(tomogram.shape[0] / 2)
+    if _plot: plot_grayscale_image(tomogram[z_half], title='Z={} - Before Cropping Fov'.format(z_half), vmin=0,
+                                   vmax=255)
 
     # if fov_portion is not 0 and 1, evaluate contrast only on the portion of the field of view
     tomogram = crop_fov(tomogram, fov_portion)
-    if _plot: plot_grayscale_image(tomogram[temp_z], title='After Cropping Fov', vmin=0, vmax=255)
+    if _plot: plot_grayscale_image(tomogram[z_half], title='After Cropping Fov', vmin=0, vmax=255)
 
-    snr_values = {}  # dict absolute_z -> contrast value
-    # USARE CICLO QUI SOTTO
-    # for z in range(0, tomogram.shape[0], z_step):
-    #    snr_values[z] = evaluate_snr_of_xy_frame(tomogram[z], _segm=True)
+    snr_image_values = {}  # dict z -> contrast value of images
+    snr_sample_values = {}  # dict absolute_z -> contrast value of the sample area
+    # TODO CHANGE HERE
+    z_selected = range(0, tomogram.shape[0], z_step)
+    # z_selected = (20, 90)
+    print('Selected z values: ', list(z_selected))
 
-    # TODO - cambiare per iterare su tutti
-    for z in range(temp_z, temp_z+1):
-        snr_values[z] = evaluate_snr_of_xy_frame(tomogram[z], _segm=True)
+    for z in z_selected:
+        print('Evaluating SNR at z={}...'.format(z))
+        snr_image_values[z], snr_sample_values[z] = evaluate_snr_of_xy_frame(tomogram[z], _segm=_segm, _plot=_plot, _verb=_verb)
+        print('  > SNR_image: {}'.format(snr_image_values[z]))
+        print('  > SNR_sample: {}\n'.format(snr_sample_values[z]))
 
-    return snr_values
+    return snr_image_values, snr_sample_values
 
 
+def plot_snrs_dual(snr_1, snr_2, _log=False, _segm=False, xlabel='x', ylabel='y', labels=('snr1', 'snr21'), title='title'):
 
+    # check if all the list has the same lentgh
+    if not len(snr_1) == len(snr_2):
+        raise ValueError('All the lists must have the same length')
+
+    if _log:
+        # convert values to log10
+        snr_1 = {k: 10 * np.log10(v) for k, v in snr_1.items()}
+        snr_2 = {k: 10 * np.log10(v) for k, v in snr_2.items()}
+
+    plt.figure(figsize=(20, 10))
+    plt.plot(snr_1.keys(), snr_1.values(), 'o-', color='b', label=labels[0])
+    if _segm:
+        plt.plot(snr_2.keys(), [v * 10 ** 6 for v in snr_2.values()], 'o-', color='g',  label=labels[1])
+    else:
+        plt.plot(snr_2.keys(), snr_2.values(), 'o-', color='g',  label=labels[1])
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.legend()
+
+    # increase number of x ticks
+    plt.xticks(np.arange(min(snr_1.keys()), max(snr_1.keys())+1, 5))
+
+    plt.show()
+    return None
 
 def main(parser):
+
+    # https://dsp.stackexchange.com/questions/61818/what-are-the-measurable-factors-of-image-sharpness
+
 
     # ===============================================================================================
     # ===================================== INITIAL OPERATIONS ======================================
@@ -197,7 +360,7 @@ def main(parser):
         os.makedirs(output_dirpath)
 
     # check if the output file exists
-    output_filepath = os.path.join(output_dirpath, output_filename)
+    # output_filepath = os.path.join(output_dirpath, output_filename)
     if os.path.exists(output_filepath):
         raise ValueError('Output file already exists. Please remove it before running the script')
 
@@ -275,10 +438,64 @@ def main(parser):
     # ===============================================================================================
     # ============================================= FUSION ==========================================
     # ===============================================================================================
-    L_contrast = evaluate_snr_along_z(L_ready, _segm=True, fov_portion=(0, 0.8), _plot=True)
-    L_contrast = evaluate_snr_along_z(L_ready, _segm=True, fov_portion=(0, 0.8), _plot=True)
-    # R_contrast = evaluate_contrast_on_z(R_ready, _segm=True, fov_portion=0.8)
+    _plot = False
+    _verb = False
 
+    _segm = True
+    z_step = 1
+
+    L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, _plot=_plot, _verb=_verb)
+    R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, _plot=_plot, _verb=_verb)
+
+    # double tomogram, double snr
+    plot_snrs_dual(L_snr_image, R_snr_image, _log=False, _segm=False, xlabel='Z', ylabel='SNR',
+                   labels=('LeftCAM SNR (Image - no segm)', 'RightCAM SNR (Image - no segm)'),
+                   title='SNR along Z - step: {}; FFT ratio 0.2'.format(z_step))
+
+    #plot log
+    plot_snrs_dual(L_snr_image, R_snr_image, _log=True, _segm=False, xlabel='Z', ylabel='SNR',
+                   labels=('LeftCAM SNR (Image - no segm)', 'RightCAM SNR (Image - no segm)'),
+                   title='Log10(SNR) along Z - step: {}; FFT ratio 0.2'.format(z_step))
+
+    # plot_snrs_dual(L_snr_image, L_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR',
+    #                labels=('LeftCAM SNR (Image - no segm)', 'LeftCAM SNR (Sample - segmented)'),
+    #                title='LeftCAM - SNR along Z - step: {}; FFT ratio 0.2'.format(z_step))
+    #
+    # plot_snrs_dual(R_snr_image, R_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR',
+    #                  labels=('RightCAM SNR (Image - no segm)', 'RightCAM SNR (Sample - segmented)'),
+    #                  title='RightCAM - SNR along Z - step: {}; FFT ratio 0.2'.format(z_step))
+
+
+
+    # save results in a file
+    with open(os.path.join(output_dirpath, 'L_snr_image.txt'), 'w') as file:
+        json.dump(L_snr_image, file)
+    with open(os.path.join(output_dirpath, 'R_snr_image.txt'), 'w') as file:
+        json.dump(R_snr_image, file)
+
+
+
+
+
+    # single
+    # if _segm:
+    #     plot_snrs_of_one_tomogram(L_snr_image, L_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR', labels=('SNR Image', 'SNR Sample * 10**6'), title='LeftCAM: SNR along Z - High Freq by FFT radius ratio 0.2')
+    # else:
+    #     plot_snrs_of_one_tomogram(L_snr_image, L_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR', labels=('SNR Image', 'SNR Image'), title='LeftCAM: SNR along Z - High Freq by FFT radius ratio 0.2')
+
+
+    # plot_snrs(L_snr.keys(), L_snr.values(), R_snr.keys(), R_snr.values(), xlabel='z', ylabel='SNR', title='SNR along Z')
+
+    # single tomogram, single snr
+    # plot_snr(L_snr.keys(), L_snr.values(),
+    #          xlabel='z', ylabel='SNR', title='SNR along Z')
+
+    # R_snr = evaluate_snr_along_z(R_ready, _segm=True, fov_portion=0.8, _plot=False)
+    # plot_snrs(L_snr.keys(), L_snr.values(), R_snr.keys(), R_snr.values(), xlabel='z', ylabel='SNR', title='SNR along Z')
+
+
+
+    print ('Done snr')
     # z_fusion = evaluate_best_z(L_contrast, R_contrast)
 
     # fused_tomogram = fuse_dual_tomograms(L_ready, R_ready, z_fusion)
