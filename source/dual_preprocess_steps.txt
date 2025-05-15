@@ -1,0 +1,8 @@
+Per ogni canale
+Per ogni camera (left, right)
+- imagej
+- convert to 8 bit
+- scale a 6um? opzionale
+
+
+

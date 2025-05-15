@@ -52,8 +52,8 @@ def plot_snr_data(left_cam_data, right_cam_data, output_dir, crossing_z_dict):
             print(f'Radius {radius}: L exceeds R at z = {crossing_z}')
 
         symbol = symbols[idx % len(symbols)]
-        plt.plot(z_values, left_snr_values, f'{symbol}-', color='b', alpha=radius, label=f'LeftCAM radius {radius}')
-        plt.plot(z_values, right_snr_values, f'{symbol}-', color='g', alpha=radius, label=f'RightCAM radius {radius}')
+        plt.plot(z_values, left_snr_values, f'{symbol}-', color='b', label=f'LeftCAM radius {radius}')
+        plt.plot(z_values, right_snr_values, f'{symbol}-', color='g', label=f'RightCAM radius {radius}')
 
         if crossing_z:
             plt.text(crossing_z + 1, np.log10(left_data[str(crossing_z)]) + 0.03, str(crossing_z), color='black', fontsize=12, ha='right')
@@ -69,6 +69,7 @@ def plot_snr_data(left_cam_data, right_cam_data, output_dir, crossing_z_dict):
 def plot_ratio_data(left_cam_data, right_cam_data, output_dir, crossing_z_dict):
     plt.figure(figsize=(20, 10))
     symbols = ['o', 's', 'D', '^', 'v', '<', '>', 'p', '*', 'h']
+    colors = plt.cm.RdGy(np.linspace(0, 1, len(left_cam_data)))
 
     for idx, (radius, left_data) in enumerate(left_cam_data.items()):
         right_data = right_cam_data[radius]
@@ -76,7 +77,7 @@ def plot_ratio_data(left_cam_data, right_cam_data, output_dir, crossing_z_dict):
         ratio_values = [right_data[str(z)] / left_data[str(z)] for z in z_values]
 
         symbol = symbols[idx % len(symbols)]
-        plt.plot(z_values, ratio_values, f'{symbol}-', color='k', alpha=radius, label=f'R/L ratio radius {radius}')
+        plt.plot(z_values, ratio_values, f'{symbol}-', color=colors[idx], label=f'R/L ratio radius {radius}')
 
     plt.axhline(y=1, color='k', linestyle='--')
     plt.xlabel('z')
@@ -86,7 +87,7 @@ def plot_ratio_data(left_cam_data, right_cam_data, output_dir, crossing_z_dict):
     plt.xticks(np.arange(min(z_values), max(z_values) + 1, 2))
 
     # Create inset plot
-    ax_inset = plt.gca().inset_axes([0.50, 0.40, 0.3, 0.5])
+    ax_inset = plt.gca().inset_axes([0.4, 0.5, 0.4, 0.4])
     min_crossing_z = min(crossing_z_dict.values())
     max_crossing_z = max(crossing_z_dict.values())
     inset_xticks = np.arange(min_crossing_z - 5, max_crossing_z + 6, 1)
@@ -102,7 +103,7 @@ def plot_ratio_data(left_cam_data, right_cam_data, output_dir, crossing_z_dict):
             inset_ratio_values = ratio_values[max(0, z_values.index(crossing_z) - 5):min(len(z_values), z_values.index(crossing_z) + 6)]
 
             symbol = symbols[idx % len(symbols)]
-            ax_inset.plot(inset_z_values, inset_ratio_values, f'{symbol}-', color='k', alpha=radius)
+            ax_inset.plot(inset_z_values, inset_ratio_values, f'{symbol}-', color=colors[idx])
 
     ax_inset.axhline(y=1, color='k', linestyle='--')
     ax_inset.set_xticks(inset_xticks)

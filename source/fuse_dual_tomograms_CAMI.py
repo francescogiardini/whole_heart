@@ -2,11 +2,14 @@ import os
 import argparse
 import json
 
+from tifffile import imsave
+
 from matplotlib.pyplot import xlabel
 from scipy.fft import fft2, ifft2, fftshift
 import numpy as np
 from skimage.filters import threshold_otsu
 from scipy.signal import correlate2d
+from scipy.signal import fftconvolve
 from scipy.ndimage import shift
 
 from custom_tool_kit import search_value_in_txt, write_on_txt, Bcolors, manage_path_argument
@@ -384,15 +387,15 @@ def plot_rgb_frames(frame_red, frame_green, title='RGB Plot'):
     plt.show()
     return None
 
-
+'''
 def realign_xy_plane(frame1, frame2):
-    '''
-    Realign the xy plane of frame2 to frame1 using cross-correlation.
+    
+    # Realign the xy plane of frame2 to frame1 using cross-correlation.
 
-    :param frame1: numpy array of the reference frame (8-bit)
-    :param frame2: numpy array of the frame to be aligned (8-bit)
-    :return: aligned frame2
-    '''
+    # :param frame1: numpy array of the reference frame (8-bit)
+    # :param frame2: numpy array of the frame to be aligned (8-bit)
+    # :return: aligned frame2
+    
     # Calculate the cross-correlation between the two frames
     cross_corr = correlate2d(frame1, frame2, mode='same')
     # TODO questo è lento, vedi sotto
@@ -407,6 +410,65 @@ def realign_xy_plane(frame1, frame2):
     aligned_frame2 = shift(frame2, shift=shift_yx)
 
     return aligned_frame2
+'''
+
+
+def realign_xy_plane(frame1, frame2):
+    '''
+    Realign the xy plane of frame2 to frame1 using cross-correlation with fftconvolve.
+
+    :param frame1: numpy array of the reference frame (8-bit)
+    :param frame2: numpy array of the frame to be aligned (8-bit)
+    :return: aligned frame2
+    '''
+    # Calculate the cross-correlation using fftconvolve
+    cross_corr = fftconvolve(frame1, frame2[::-1, ::-1], mode='same')
+
+    # Find the peak in the cross-correlation
+    max_idx = np.unravel_index(np.argmax(cross_corr), cross_corr.shape)
+    center = np.array(cross_corr.shape) // 2
+    shift_yx = np.array(max_idx) - center
+
+    # Apply the shift to frame2
+    aligned_frame2 = shift(frame2, shift=shift_yx)
+
+    return aligned_frame2, shift_yx
+
+
+def fuse_dual_tomograms(top, bottom, z_switch):
+    """
+    Fuse two tomograms along the z-axis.
+
+    :param L_ready_zyx: numpy array of the left tomogram (z, y, x)
+    :param R_zyx_realigned: numpy array of the right tomogram (z, y, x), realigned on xy plane
+    :param z_fusion: integer, the z index where the fusion occurs
+    :return: fused tomogram (z, y, x)
+    """
+    # Use R_zyx_realigned from 0 to z_fusion
+    top_part = top[:z_switch + 1, ...]
+
+    # Use L_ready_zyx from z_fusion + 1 to the end
+    bottom_part = bottom[z_switch + 1:, ...]
+
+    # Concatenate the two parts along the z-axis
+    fused_tomogram = np.concatenate((top_part, bottom_part), axis=0)
+
+    return fused_tomogram
+
+
+def save_fused_tomogram(fused_tomogram, output_filepath):
+    """
+    Save the 3D fused tomogram as a TIFF file with correct axis order.
+
+    :param fused_tomogram: numpy array of the fused tomogram (z, y, x)
+    :param output_filepath: string, path to save the output TIFF file
+    """
+    # Ensure the data is in the correct format (z, y, x)
+    if len(fused_tomogram.shape) != 3:
+        raise ValueError("Fused tomogram must be a 3D numpy array (z, y, x).")
+
+    # Save the 3D array as a TIFF file
+    imsave(output_filepath, fused_tomogram, imagej=True)
 
 
 def main(parser):
@@ -488,9 +550,9 @@ def main(parser):
         mess_strings.append(Bcolors.WARNING + '\n\n*** Preprocessing informations:' + Bcolors.ENDC)
         mess_strings.append(' ATTENTION > Skip preprocessing step ')
         print('Loading LEFT_CAM  tomogram....')
-        L_ready, shape_L = load_tiff_stack_zyx(left_cam_path) # (r, c, z) -> (z, y, x)
+        L_ready_zyx, shape_L = load_tiff_stack_zyx(left_cam_path) # (r, c, z) -> (z, y, x)
         print('Loading RIGHT_CAM  tomogram....')
-        R_ready, shape_R = load_tiff_stack_zyx(right_cam_path) # (r, c, z) -> (z, y, x)
+        R_ready_zyx, shape_R = load_tiff_stack_zyx(right_cam_path) # (r, c, z) -> (z, y, x)
         print('Done.')
 
         # add info to the report
@@ -501,12 +563,12 @@ def main(parser):
                             format(shape_R[0], shape_R[1], shape_R[2]))
     else:
         # TODO PREPROCESSING FUNCTION
-        # L_ready, shape_L = dual_mesospim_preprocessing(leftCAM_path)
-        # R_ready, shape_R = dual_mesospim_preprocessing(rightCAM_path)
+        # L_ready_zyx, shape_L = dual_mesospim_preprocessing(leftCAM_path)
+        # R_ready_zyx, shape_R = dual_mesospim_preprocessing(rightCAM_path)
 
         # save preprocessed tomograms
-        # save_tiff_stack_zyx(L_ready, output_dirpath, 'preprocessed_LEFT_CAM')
-        # save_tiff_stack_zyx(R_ready, output_dirpath, 'preprocessed_RIGHT_CAM')
+        # save_tiff_stack_zyx(L_ready_zyx, output_dirpath, 'preprocessed_LEFT_CAM')
+        # save_tiff_stack_zyx(R_ready_zyx, output_dirpath, 'preprocessed_RIGHT_CAM')
         pass
 
     # print and add to .txt
@@ -528,8 +590,8 @@ def main(parser):
     '''
     for radius in [0.01, 0.02, 0.04, 0.06]:
         print(Bcolors.OKBLUE + '\n\n*** Evaluating SNR with radius ratio: {} '.format(radius) + Bcolors.ENDC)
-        L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, radius=radius, _plot=_plot, _verb=_verb)
-        R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, radius=radius, _plot=_plot, _verb=_verb)
+        L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready_zyx, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, radius=radius, _plot=_plot, _verb=_verb)
+        R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready_zyx, _segm=_segm, fov_portion=(0, 0.8), z_step=z_step, radius=radius, _plot=_plot, _verb=_verb)
 
         # double tomogram, double snr
         # plot_snrs_dual(L_snr_image, R_snr_image, _log=False, _segm=False, xlabel='Z', ylabel='SNR',
@@ -587,29 +649,36 @@ def main(parser):
     # ===================================== REALIGNMENT ON XY PLANE  ==========================================
 
     # extract frames from L and R tomogram at best z for furion
-    L_switch_frame = L_ready[z_fusion]
-    R_switch_frame = R_ready[z_fusion]
+    L_switch_frame = L_ready_zyx[z_fusion]
+    R_switch_frame = R_ready_zyx[z_fusion]
 
     # plot the two frames in red and green on the same plot with two different color to check the alignment
     plot_rgb_frames(L_switch_frame, R_switch_frame, title='Alignment Check - Best Z: {}'.format(z_fusion))
 
     # perform the realignment on the xy plane on R tomogram
-    print("Realigning the xy plane of the RIGHT tomogram...")
-    R_ready_realigned = realign_xy_plane(L_switch_frame, R_switch_frame)
+    print("Evaluating the xy translation of Right tomogram respect to left...")
+    R_switch_frame_realigned, right_shift_yx = realign_xy_plane(L_switch_frame, R_switch_frame)
 
     # check realignment
-    plot_rgb_frames(L_switch_frame, R_ready_realigned, title='Realignment Check - Best Z: {}'.format(z_fusion))
+    plot_rgb_frames(L_switch_frame, R_switch_frame_realigned, title='Realignment Check - Best Z: {}'.format(z_fusion))
 
+    # translate right tomogram
+    print('Realigning the xy plane of the RIGHT tomogram...')
+    # accurato anche per shift non interi ma lento
+    # R_zyx_realigned = shift(R_ready_zyx, shift=(0, right_shift_yx[0], right_shift_yx[1]))
+    # più veloce (solo shift interi)
+    R_zyx_realigned = np.roll(R_ready_zyx, shift=(0, right_shift_yx[0], right_shift_yx[1]), axis=(0, 1, 2))
 
+    # fuse the two tomograms
+    print('Fusing the two tomograms...')
+    plot_rgb_frames(L_ready_zyx[z_fusion], R_zyx_realigned[z_fusion], title='3D Realignment Check - Best Z: {}'.format(z_fusion))
+    fused_tomogram = fuse_dual_tomograms(top=R_zyx_realigned, bottom=L_ready_zyx, z_switch=z_fusion)
 
-    # todo
-    # fused_tomogram = fuse_dual_tomograms(L_ready, R_ready, z_fusion)
+    print('Saving the fused tomogram...')
+    save_fused_tomogram(fused_tomogram, output_filepath)
 
-    # save_fused_tomogram(fused_tomogram, output_filepath)
-
-
-
-
+    print(Bcolors.OKBLUE + '\n\n**************** End Dual Tomogram Fusion ****************' + Bcolors.ENDC)
+    return None
 
 
 if __name__ == '__main__':
