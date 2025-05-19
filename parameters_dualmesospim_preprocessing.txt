@@ -1,0 +1,17 @@
+# PARAMETRI SISTEMA ACQUISIZIONE _____________________________________________
+
+# Parameters of Acquisition System:
+# Pixel Size (micro-meter, um)
+px_size_xy = 6	
+px_size_z = 60
+
+# FWHM (um)
+fwhm_xy = 1
+fwhm_z = 1
+
+
+
+
+
+
+
