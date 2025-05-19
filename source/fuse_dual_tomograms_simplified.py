@@ -3,6 +3,7 @@ import argparse
 import json
 
 import cv2
+from numpy.ma.core import outer
 from scipy.fft import fft2, fftshift
 from scipy.signal import fftconvolve
 import numpy as np
@@ -719,7 +720,7 @@ def main(parser):
     right_cam_path = manage_path_argument(args.rightCAM_path)
     parameter_filepath = args.parameters_filepath[0]
     base_dirpath = os.path.dirname(left_cam_path)
-    output_folderpath = os.path.join(base_dirpath, "preprocessing")
+    output_folderpath = args.output_folderpath[0] if args.output_folderpath else os.path.join(base_dirpath, "preprocessing")
     z_fusion = args.z_fusion[0] if args.z_fusion else None
     _skip_preprocessing = args.skip_preprocessing
     output_voxel_size = args.voxel_size[0] if args.voxel_size else None
@@ -927,6 +928,10 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--parameters-filepath',
                         nargs='+', required=True,
                         help='filepath of parameters.txt file')
+    # add output folder if needed
+    parser.add_argument('-o', '--output_folderpath',
+                        type=str, nargs=1, required=False,
+                        help='Path to the output folder')
     parser.add_argument('-sp', '--skip_preprocessing',
                         action='store_true',
                         help='Skip preprocessing step. If passed, LEFT and RIGHT input must be path of tiffiles of'
