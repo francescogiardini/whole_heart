@@ -3,19 +3,111 @@ import argparse
 import json
 
 from tifffile import imsave
+from tifffile import imread as imread
 
-from matplotlib.pyplot import xlabel
-from scipy.fft import fft2, ifft2, fftshift
+
+from scipy.fft import fft2, fftshift
 import numpy as np
 from skimage.filters import threshold_otsu
-from scipy.signal import correlate2d
+
 from scipy.signal import fftconvolve
 from scipy.ndimage import shift
 
-from custom_tool_kit import search_value_in_txt, write_on_txt, Bcolors, manage_path_argument
-from custom_image_base_tool import load_tiff_stack_zyx
-
 import matplotlib.pyplot as plt
+
+
+class Bcolors:
+    VERB = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
+def load_tiff_stack_zyx(filepath):
+    '''
+    input: filepath
+    output: data, shape
+    load tifffile from filepath and move axis to (z, y, x)
+    return data and shape '''
+    data = imread(filepath) # (z, y, x)
+    shape = data.shape
+    return data, shape
+
+
+def manage_path_argument(source_path):
+    """
+    # manage input parameters:
+    # if script is call by terminal, source_path is a list with one string inside (correct source path)
+    # if script is call by another script (structural_analysis, for example), and if source_path contains some ' ' whitesace,
+    # system split the string in the list, so it joins it
+
+    :param source_path : variables from args.source_folder
+                         it's a list with inside the path of the images to processing.
+    :return
+    """
+    try:
+        if source_path is not None:
+            if type(source_path) is list:
+                if len(source_path) > 1:
+                    # there are white spaces, system split in more string (wrong)
+                    given_path = ' '.join(source_path)
+                else:
+                    given_path = source_path[0]
+            else:
+                given_path = source_path
+
+            # # correct whitespace with backslash
+            # given_path = given_path.replace(' ', '\ ')
+
+            # extract base path
+            if given_path.endswith('/'):
+                given_path = given_path[0:-1]
+            return given_path
+        else:
+            return None
+
+    except:
+        print(Bcolors.FAIL + '[manage_path_argument] -> source_path is empty?' + Bcolors.ENDC)
+        return None
+
+
+def search_value_in_txt(filepath, strings_to_search):
+    # strings_to_search is a string or a list of string
+    if type(strings_to_search) is not list:
+        strings_to_search = [strings_to_search]
+
+    # read all words in filepath
+    words = all_words_in_txt(filepath)
+
+    # search strings
+    values = [words[words.index(s) + 2] for s in strings_to_search if s in words]
+
+    return values
+
+
+def write_on_txt(strings, txt_path, _print=False, mode='a'):
+    # write the lines in 'strings' list into .txt file addressed by txt_path
+    # if _print is True, the lines is printed
+    #
+    with open(txt_path, mode=mode) as txt:
+        for s in strings:
+            txt.write(s + '\n')
+            if _print:
+                print(s)
+
+
+def all_words_in_txt(filepath):
+    words = list()
+    with open(filepath, 'r') as f:
+        data = f.readlines()
+        for line in data:
+            for word in line.split():
+                words.append(word)
+    return words
 
 
 def plot_grayscale_image(image, vmin=0, vmax=255, title='Title'):
@@ -58,14 +150,13 @@ def segment_backround_otsu(image):
 # def fuse_dual_tomograms(tomogram1, tomogram2, output_path):
    # TODO
 
-def prepare_initial_report(left_cam_path, right_cam_path, parameter_filepath, output_folderpath,
+def prepare_initial_report(left_cam_path, right_cam_path, output_folderpath,
                            output_filename, output_filepath, _skip_preprocessing, z_fusion):
     mess_strings = list()
     mess_strings.append(Bcolors.OKBLUE + '\n\n**************** Start Dual Tomogram Fusion ****************' + Bcolors.ENDC)
     mess_strings.append('Fusion of two DualMesoSPIM tomograms. \n\n Input parameters:')
     mess_strings.append(' > LEFT_CAM source path: {}'.format(left_cam_path))
     mess_strings.append(' > RIGHT_CAM source path: {}'.format(right_cam_path))
-    mess_strings.append(' > Parameters filepath: {}'.format(parameter_filepath))
     mess_strings.append(' > Output folder path: {}'.format(output_folderpath))
     mess_strings.append(' > Output filename: {}'.format(output_filename))
     mess_strings.append(' > Output filepath: {}'.format(output_filepath))
@@ -484,7 +575,6 @@ def main(parser):
     args = parser.parse_args()
     left_cam_path = manage_path_argument(args.leftCAM_path)
     right_cam_path = manage_path_argument(args.rightCAM_path)
-    parameter_filepath = args.parameters_filepath[0]
     if args.output_filepath:
         output_filepath = manage_path_argument(args.output_filepath)
         output_filename = os.path.basename(output_filepath)
@@ -512,7 +602,7 @@ def main(parser):
         raise ValueError('Right CAM tomogram not found')
 
     # prepare initial messages for console and report.txt
-    mess_strings = prepare_initial_report(left_cam_path, right_cam_path, parameter_filepath, output_dirpath,
+    mess_strings = prepare_initial_report(left_cam_path, right_cam_path, output_dirpath,
                            output_filename, output_filepath, _skip_preprocessing, z_fusion)
 
     # create report txt file
@@ -524,18 +614,6 @@ def main(parser):
     # clear list of strings
     mess_strings.clear()
 
-    # extract parameters from parameters.txt file
-    parameter_filename = os.path.basename(parameter_filepath)
-    param_names = ['px_size_xy', 'px_size_z', 'fwhm_xy', 'fwhm_z']
-    param_values = search_value_in_txt(parameter_filepath, param_names)
-
-    # create dictionary of parameters and add info to mess_strings
-    parameters = {}
-    mess_strings.append(' \n*** Parameters extracted from {}'.format(parameter_filepath))
-    for i, p_name in enumerate(param_names):
-        parameters[p_name] = float(param_values[i])
-        mess_strings.append('> {} - {}'.format(p_name, parameters[p_name]))
-
     # print to screen, create .txt file and write into .txt file all temporal informations
     write_on_txt(mess_strings, report_filepath, _print=True, mode='w')
     # clear list of strings
@@ -546,7 +624,8 @@ def main(parser):
     # ----------   from original DUAL_mesoSPIM image sequence to 8bit 6um tiffile -------------------
     # ===============================================================================================
 
-    if _skip_preprocessing:
+    # if _skip_preprocessing:
+    if True:
         mess_strings.append(Bcolors.WARNING + '\n\n*** Preprocessing informations:' + Bcolors.ENDC)
         mess_strings.append(' ATTENTION > Skip preprocessing step ')
         print('Loading LEFT_CAM  tomogram....')
@@ -655,9 +734,6 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--rightCAM_path',
                         type=str, nargs=1, required=True,
                         help='Path to the RIGHT Cam2 tomogram')
-    parser.add_argument('-p', '--parameters-filepath',
-                        nargs='+', required=True,
-                        help='filepath of parameters.txt file')
     parser.add_argument('-o', '--output_filepath',
                         type=str, nargs=1, required=False,
                         help='Output filepath. If not passed, fused_tomogram will be saved in the base directory of the input')
