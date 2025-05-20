@@ -2,26 +2,18 @@ import os
 import argparse
 import json
 
+import numpy as np
 import cv2
-from numpy.ma.core import outer
 from scipy.fft import fft2, fftshift
 from scipy.signal import fftconvolve
-import numpy as np
+from scipy.ndimage import shift, zoom
 from skimage.filters import threshold_otsu
-from scipy.ndimage import shift
+from tifffile import imread, imsave
 from skimage.filters.tests.test_median import image
-
-from custom_tool_kit import search_value_in_txt, write_on_txt, Bcolors, manage_path_argument
-from custom_image_base_tool import load_tiff_stack_zyx
-
 import matplotlib.pyplot as plt
 
-from scipy.ndimage import zoom
-from scipy.optimize import minimize
-
-from tifffile import imread, imsave
-
-from source.custom_tool_kit import create_fldr
+from custom_tool_kit import search_value_in_txt, write_on_txt, Bcolors, manage_path_argument, create_fldr
+from custom_image_base_tool import load_tiff_stack_zyx
 
 
 def plot_grayscale_image(image, vmin=0, vmax=255, title='Title'):
@@ -547,7 +539,7 @@ def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, ma
     """
     # Load TIFF sequence into a 3D array
     print('Loading TIFF sequence from {}...'.format(imgseq_path))
-    tiff_files = sorted([os.path.join(imgseq_path, f) for f in os.listdir(imgseq_path) if f.endswith('.tif')])
+    tiff_files = sorted([os.path.join(imgseq_path, f) for f in os.listdir(imgseq_path) if f.endswith(('.tif', '.tiff'))])
     tomogram = np.stack([imread(f) for f in tiff_files], axis=0)  # (z, y, x)
 
     # ===============================
