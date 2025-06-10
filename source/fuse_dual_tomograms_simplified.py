@@ -9,7 +9,7 @@ from scipy.signal import fftconvolve
 from scipy.ndimage import shift, zoom
 from skimage.filters import threshold_otsu
 from tifffile import imread, imsave
-from skimage.filters.tests.test_median import image
+# from skimage.filters.tests.test_median import image
 import matplotlib.pyplot as plt
 
 from custom_tool_kit import search_value_in_txt, write_on_txt, Bcolors, manage_path_argument, create_fldr
@@ -848,7 +848,7 @@ def main(parser):
     '''
 
     # save results in a file
-    snr_values_out_path = os.path.join(base_dirpath, 'snr_values')
+    snr_values_out_path = os.path.join(output_folderpath, 'snr_values')
     if not os.path.exists(snr_values_out_path):
         os.makedirs(snr_values_out_path)
     with open(os.path.join(snr_values_out_path, 'L_snr_image_radius{}_zstep{}.txt'.format(radius, z_slicing)), 'w') as file:
