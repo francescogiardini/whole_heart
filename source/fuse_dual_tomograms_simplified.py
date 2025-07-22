@@ -677,27 +677,22 @@ def fuse_dual_tomograms(top, bottom, z_switch):
 
 def fuse_dual_tomograms(top: np.ndarray, bottom: np.ndarray, z_switch: int) -> np.ndarray:
     """
-    Efficiently fuse two tomograms along Z axis using in-place memory allocation.
-
-    Parameters:
-        top (np.ndarray): First tomogram (e.g., left or upper part), shape (Z, Y, X)
-        bottom (np.ndarray): Second tomogram (e.g., right or lower part), shape (Z, Y, X)
-        z_switch (int): Index in Z where fusion occurs
+    Fuse two tomograms along Z, using:
+    - top[:z_switch+1]
+    - bottom[z_switch+1:]
+    Avoids duplication of z_switch frame.
 
     Returns:
-        np.ndarray: Fused tomogram
+        np.ndarray: fused tomogram (Z, Y, X)
     """
-    # No slicing (no RAM copy), just calculate shape
-    output_shape = (top.shape[0] + bottom.shape[0] - (z_switch + 1), *top.shape[1:])
+    z_top = z_switch + 1
+    z_bottom = bottom.shape[0] - z_top
 
-    # preallocate the output array
+    output_shape = (z_top + z_bottom, *top.shape[1:])
     fused = np.empty(output_shape, dtype=top.dtype)
 
-    # Write top portion (0:z_switch+1)
-    fused[:z_switch + 1] = top[:z_switch + 1]
-
-    # Write bottom portion (z_switch+1: end)
-    fused[z_switch + 1:] = bottom[z_switch + 1:]
+    fused[:z_top] = top[:z_top]
+    fused[z_top:] = bottom[z_top:]
 
     return fused
 
