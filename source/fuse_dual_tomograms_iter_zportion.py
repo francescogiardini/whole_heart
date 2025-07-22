@@ -1,7 +1,6 @@
 import os
 import argparse
 import json
-import gc
 
 import numpy as np
 import cv2
@@ -9,11 +8,9 @@ from scipy.fft import fft2, fftshift
 from scipy.signal import fftconvolve
 from scipy.ndimage import shift, zoom
 from skimage.filters import threshold_otsu
-from tifffile import imread, imwrite
+from tifffile import imread, imsave
 # from skimage.filters.tests.test_median import image
 import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
 
 from custom_tool_kit import search_value_in_txt, write_on_txt, Bcolors, manage_path_argument, create_fldr
 from custom_image_base_tool import load_tiff_stack_zyx
@@ -337,7 +334,8 @@ def plot_snrs_dual(snr_1, snr_2, _log=False, _segm=False, xlabel='x', ylabel='y'
     if _save:
         plt.savefig(os.path.join(_output_dirpath, fname))
 
-    plt.close()
+    # show plot
+    plt.show()
     return None
 
 
@@ -395,7 +393,7 @@ def plot_rgb_frames(frame_red, frame_green, title='RGB Plot', red_ch=None, green
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
         print(f"Plot saved at: {save_path}")
 
-    plt.close()
+    plt.show()
     return None
 
 
@@ -563,24 +561,6 @@ def apply_scale_and_translation(img, scale, tx, ty):
 
     return transformed
 
-# resample tomogram but saving RAM
-def resample_volume_slicewise(tomogram, scale_z, scale_xy):
-    # Prima: scala XY per ogni slice
-    slices_scaled = [
-        zoom(slice_, zoom=scale_xy, order=1)  # slice_ è 2D
-        for slice_ in tomogram
-    ]
-    # Stack lungo Z
-    stack_xy = np.stack(slices_scaled)
-
-    # Poi: riscalo lungo Z
-    if scale_z != 1.0:
-        rescaled = zoom(stack_xy, (scale_z, 1, 1), order=1)
-    else:
-        rescaled = stack_xy
-
-    return rescaled
-
 
 def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, max_intensity=None,
                              _save_preprocessed_tomograms=False, outfolderpath=None, cam_name=None, _eight_bit=False):
@@ -601,19 +581,19 @@ def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, ma
     tomogram = np.stack([imread(f) for f in tiff_files], axis=0)  # (z, y, x)
 
     # ===============================
-    # SCALING DIMENSIONS
+    # SCALING
     # ===============================
+
+    # Calculate scaling factors
+    px_size_xy = parameters['px_size_xy']
+    px_size_z = parameters['px_size_z']
+
     if output_voxel_size:
-        scale_xy = parameters['px_size_xy'] / output_voxel_size
-        scale_z = parameters['px_size_z'] / output_voxel_size
+        scale_xy = px_size_xy / output_voxel_size
+        scale_z = px_size_z / output_voxel_size
         # Apply scaling
         print('Scaling tomogram to voxel size {}...'.format(output_voxel_size))
-
-        # DEPRECATED (Memory intensive), see below
-        # tomogram_scaled = zoom(tomogram, (scale_z, scale_xy, scale_xy), order=1)  # Linear interpolation
-        tomogram_scaled = resample_volume_slicewise(tomogram, scale_z, scale_xy)
-        del tomogram  # Free memory
-        gc.collect()
+        tomogram_scaled = zoom(tomogram, (scale_z, scale_xy, scale_xy), order=1)  # Linear interpolation
     else:
         # Not Apply scaling
         print('No scaling applied. Using original voxel size.')
@@ -625,33 +605,24 @@ def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, ma
     if max_intensity:
         # Rescale the histogram to the specified maximum intensity
         print('Rescaling histogram to maximum intensity {} '.format(max_intensity))
-        tomogram_scaled = equalize_max_with_clip_inplace(tomogram_scaled, max_intensity, dtype=np.uint16)
+        tomogram_scaled = equalize_max_with_clip(tomogram_scaled, max_intensity, dtype=np.uint16)
     else:
         # Not Apply equalization
         print('No equalization applied. Using original intensity range')
 
     if _eight_bit:
         print('Rescaling histogram to maximum intensity 255 and convert to 8bit ')
-        tomogram_scaled = convert_16bit_to_8bit_inplace(img16=tomogram_scaled)
+        tomogram_scaled = convert_16bit_to_8bit(img16=tomogram_scaled)
 
     # Save the preprocessed tomogram if required
     if _save_preprocessed_tomograms and outfolderpath and cam_name:
-        # outfname = cam_name + '_ds{}um_eq{}.tif'.format(int(output_voxel_size), int(max_intensity))
-        outfname = cam_name + (
-            '_ds{}um'.format(int(output_voxel_size)) if output_voxel_size is not None else '') + '_eq{}.tif'.format(
-            int(max_intensity))
+        outfname = cam_name + '_ds{}um_eq{}.tif'.format(int(output_voxel_size), int(max_intensity))
         outfolderpath = os.path.join(outfolderpath, outfname)
         print('Saving preprocessed tomogram to {}...'.format(outfolderpath))
-        imwrite(outfolderpath, tomogram_scaled, imagej=True)
+        imsave(outfolderpath, tomogram_scaled, imagej=True)
 
     return tomogram_scaled, tomogram_scaled.shape
 
-
-'''
-DEPREACTED BECAUSE OF MEMORY
-top[...] e bottom[...] → creano due nuove copie in RAM
-np.concatenate(...) → crea una terza copia finale
-Totale: RAM = ~3× slice size
 
 def fuse_dual_tomograms(top, bottom, z_switch):
     """
@@ -672,80 +643,9 @@ def fuse_dual_tomograms(top, bottom, z_switch):
     fused_tomogram = np.concatenate((top_part, bottom_part), axis=0)
 
     return fused_tomogram
-'''
 
 
-def fuse_dual_tomograms(top: np.ndarray, bottom: np.ndarray, z_switch: int) -> np.ndarray:
-    """
-    Efficiently fuse two tomograms along Z axis using in-place memory allocation.
-
-    Parameters:
-        top (np.ndarray): First tomogram (e.g., left or upper part), shape (Z, Y, X)
-        bottom (np.ndarray): Second tomogram (e.g., right or lower part), shape (Z, Y, X)
-        z_switch (int): Index in Z where fusion occurs
-
-    Returns:
-        np.ndarray: Fused tomogram
-    """
-    # No slicing (no RAM copy), just calculate shape
-    output_shape = (top.shape[0] + bottom.shape[0] - (z_switch + 1), *top.shape[1:])
-
-    # preallocate the output array
-    fused = np.empty(output_shape, dtype=top.dtype)
-
-    # Write top portion (0:z_switch+1)
-    fused[:z_switch + 1] = top[:z_switch + 1]
-
-    # Write bottom portion (z_switch+1: end)
-    fused[z_switch + 1:] = bottom[z_switch + 1:]
-
-    return fused
-
-
-def save_tomogram_for_fiji(tomogram, output_folderpath, voxel_size, fname='', axes='ZYX'):
-    """
-    Salva un tomogramma 3D come file TIFF compatibile con Fiji.
-
-    :param tomogram: numpy array del tomogramma (z, y, x)
-    :param output_folderpath: stringa, percorso della cartella di output
-    :param voxel_size: dimensione del voxel in micrometri (float o tuple per ZYX)
-    :param parameters: dizionario opzionale con parametri aggiuntivi (es. 'px_size_xy', 'px_size_z')
-    :param fname: nome del campione per il file di output (opzionale)
-    :param axes: stringa che specifica l'ordine degli assi (default: 'ZYX')
-    :param dtype: tipo di dato per il salvataggio (default: np.uint16)
-    :return: percorso del file salvato
-    """
-    # Verifica che il tomogramma sia un array 3D
-    if len(tomogram.shape) != 3:
-        raise ValueError("Il tomogramma deve essere un array numpy 3D (z, y, x).")
-
-    # Determina la dimensione del voxel
-    if isinstance(voxel_size, (float, int)):
-        voxel_size = (voxel_size, voxel_size, voxel_size)
-    elif len(voxel_size) != 3:
-        raise ValueError("voxel_size deve essere un singolo valore o una tupla di 3 valori (Z, Y, X).")
-
-    # Salva l'array 3D come file TIFF
-    fname = f"{fname}_tomogramZYX.tif" if fname and not fname.endswith('.tif') else (
-        fname if fname else "tomogramZYX.tif")
-    output_filepath = os.path.join(output_folderpath, fname)
-
-    imwrite(output_filepath,
-            tomogram,
-            imagej=True,
-            metadata={
-                'axes': axes,
-                'spacing': voxel_size[0],  # distanza tra slice (Z)
-                'unit': 'um',  # unità di misura
-            },
-            resolution=(1.0 / voxel_size[2], 1.0 / voxel_size[1]),  # XY resolution (from ZYX format)
-            )
-    return output_filepath
-
-
-'''
-def save_fused_tomogram(fused_tomogram, output_folderpath, _skip_preprocessing,
-                                      output_voxel_size, parameters, sample_name=''):
+def save_fused_tomogram(fused_tomogram, output_folderpath):
     """
     Save the 3D fused tomogram as a TIFF file with correct axis order.
 
@@ -756,62 +656,11 @@ def save_fused_tomogram(fused_tomogram, output_folderpath, _skip_preprocessing,
     if len(fused_tomogram.shape) != 3:
         raise ValueError("Fused tomogram must be a 3D numpy array (z, y, x).")
 
-    # create metadata for the TIFF file
-    if _skip_preprocessing:
-        metadata = {
-            'axes': 'ZYX',
-            'spacing': parameters['px_size_z'],  # distanza tra slice (Z)
-            'unit': 'um',  # unità di misura, può essere anche 'micron'
-            'resolution': (1.0 / parameters['px_size_xy'], 1.0 / parameters['px_size_xy']),  # in pixel per µm
-        }
-    else:
-        metadata = {
-            'axes': 'ZYX',
-            'spacing': output_voxel_size,  # distanza tra slice (Z)
-            'unit': 'um',  # unità di misura, può essere anche 'micron'
-            'resolution': (1.0 / output_voxel_size, 1.0 / output_voxel_size),  # in pixel per µm
-        }
-
     # Save the 3D array as a TIFF file
-    fname = '{}_fused_tomogram.tif'.format(sample_name) if sample_name else 'fused_tomogram.tif'
-    output_filepath = os.path.join(output_folderpath, fname)
-    imsave(output_filepath, fused_tomogram, imagej=True, metadata=metadata)
-    return output_filepath
-'''
+    output_filepath = os.path.join(output_folderpath, 'fused_tomogram.tif')
+    imsave(output_filepath, fused_tomogram, imagej=True)
 
 
-def save_fused_tomogram(fused_tomogram, output_folderpath, _skip_preprocessing,
-                        output_voxel_size, parameters, sample_name=''):
-    """
-    Salva il tomogramma fuso utilizzando la funzione save_tomogram_for_fiji.
-
-    :param fused_tomogram: numpy array del tomogramma fuso (z, y, x)
-    :param output_folderpath: stringa, percorso della cartella di output
-    :param _skip_preprocessing: booleano, indica se saltare il preprocessing
-    :param output_voxel_size: dimensione del voxel in micrometri
-    :param parameters: dizionario con parametri aggiuntivi
-    :param sample_name: nome del campione per il file di output (opzionale)
-    :return: percorso del file salvato
-    """
-    # Determina la dimensione del voxel
-    if _skip_preprocessing:
-        voxel_size = (parameters['px_size_z'], parameters['px_size_xy'], parameters['px_size_xy'])
-    else:
-        voxel_size = (output_voxel_size, output_voxel_size, output_voxel_size)
-
-    # Salva il tomogramma fuso come file TIFF compatibile con Fiji
-    output_filepath = save_tomogram_for_fiji(
-        tomogram=fused_tomogram,
-        output_folderpath=output_folderpath,
-        voxel_size=voxel_size,
-        fname=sample_name,
-        axes='ZYX'
-    )
-
-    return output_filepath
-
-'''
-NOT USED ANYMORE
 def zoom_and_center_crop(input_array_zyx, scale_yx):
     """
     Apply zoom in the xy plane to a 3D array and return an output with the same shape as the input.
@@ -841,7 +690,6 @@ def zoom_and_center_crop(input_array_zyx, scale_yx):
             output_array = zoomed_array[:, start:end, start:end]
 
     return output_array
-'''
 
 
 def transform_volume_xy(volume, scale, tx, ty, interpolation=cv2.INTER_LINEAR):
@@ -873,12 +721,6 @@ def transform_volume_xy(volume, scale, tx, ty, interpolation=cv2.INTER_LINEAR):
 
     return transformed_volume
 
-'''
-==================================
-DEPRECATED BECAUSE OF MEMORY ISSUES   -   see below for the inplace version
-np.clip(image, 0, max_intensity) → nuova copia in RAM
-* scale_factor → altra copia temporanea (probabilmente in float64)
-.astype(dtype) → altra copia finale
 
 def equalize_max_with_clip(image, max_intensity, dtype=np.uint16):
     max_val = np.iinfo(dtype).max  # es. 65535 for uint16
@@ -887,43 +729,16 @@ def equalize_max_with_clip(image, max_intensity, dtype=np.uint16):
     # linear transformation
     rescaled = np.clip(image, 0, max_intensity) * scale_factor
     return rescaled.astype(dtype)
-==================================
-'''
-def equalize_max_with_clip_inplace(volume, max_intensity, dtype=np.uint16):
-    max_val = np.iinfo(dtype).max
-    scale_factor = max_val / max_intensity
-    output = np.empty_like(volume, dtype=dtype)
-
-    for z in range(volume.shape[0]):
-        # Clipping + scaling per slice
-        slice_ = np.clip(volume[z], 0, max_intensity)
-        slice_ = slice_ * scale_factor
-        output[z] = slice_.astype(dtype)
-
-    return output
 
 
-'''
-# DEPRECATED BECAUSE OF MEMORY ISSUES
-# (img16 / 256) → crea un array temporaneo in float64
-# .astype('uint8') → nuova copia finale in uint8
 def convert_16bit_to_8bit(img16):
     return (img16/256).astype('uint8')
-'''
-
-def convert_16bit_to_8bit_inplace(img16):
-    z, y, x = img16.shape
-    img8 = np.empty((z, y, x), dtype=np.uint8)
-
-    for i in range(z):
-        # Cast direttamente in uint8 evitando float64 temporanei
-        img8[i] = (img16[i] >> 8).astype(np.uint8)  # divide by 256, safer and faster
-
-    return img8
-
 
 
 def main(parser):
+
+    # https://dsp.stackexchange.com/questions/61818/what-are-the-measurable-factors-of-image-sharpness
+
 
     # ===============================================================================================
     # ===================================== INITIAL OPERATIONS ======================================
@@ -935,7 +750,7 @@ def main(parser):
     right_cam_path = manage_path_argument(args.rightCAM_path)
     parameter_filepath = args.parameters_filepath[0]
     base_dirpath = os.path.dirname(left_cam_path)
-    output_folderpath = args.output_folderpath[0] if args.output_folderpath else base_dirpath
+    output_folderpath = args.output_folderpath[0] if args.output_folderpath else os.path.join(base_dirpath, "preprocessing")
     z_fusion = args.z_fusion[0] if args.z_fusion else None
     _skip_preprocessing = args.skip_preprocessing
     output_voxel_size = args.voxel_size[0] if args.voxel_size else None
@@ -945,9 +760,9 @@ def main(parser):
     _eight_bit = args.eight_bit
     fft_radius = args.fft_radius[0]
 
+
     # check if the output folder exists
-    preproc_output_fpath = os.path.join(output_folderpath, 'preprocessing')
-    create_fldr(preproc_output_fpath)
+    create_fldr(output_folderpath)
 
     # check if the input files exist
     if not os.path.exists(left_cam_path):
@@ -956,10 +771,10 @@ def main(parser):
         raise ValueError('Right CAM tomogram not found')
 
     # create report txt file
-    report_filepath = os.path.join(preproc_output_fpath, 'fusion_report.txt')
+    report_filepath = os.path.join(output_folderpath, 'fusion_report.txt')
 
     # prepare initial messages for console and report.txt
-    mess_strings = prepare_initial_report(args, preproc_output_fpath, report_filepath)
+    mess_strings = prepare_initial_report(args, output_folderpath, report_filepath)
 
     # print to screen, create .txt file and write into .txt file all temporal information
     write_on_txt(mess_strings, report_filepath, _print=True, mode='w')
@@ -990,17 +805,15 @@ def main(parser):
 
     if _skip_preprocessing:
         mess_strings.append(Bcolors.WARNING + '\n\n*** Preprocessing informations:' + Bcolors.ENDC)
-        mess_strings.append(' ATTENTION > Skip preprocessing step')
-        print('Loading LEFT_CAM  tomogram from {}...'.format(left_cam_path))
+        mess_strings.append(' ATTENTION > Skip preprocessing step ')
+        print('Loading LEFT_CAM  tomogram....')
         L_ready_zyx, shape_L = load_tiff_stack_zyx(left_cam_path) # (r, c, z) -> (z, y, x)
-        print('Loading RIGHT_CAM  tomogram from {}...'.format(right_cam_path))
+        print('Loading RIGHT_CAM  tomogram....')
         R_ready_zyx, shape_R = load_tiff_stack_zyx(right_cam_path) # (r, c, z) -> (z, y, x)
         print('Done.')
 
         # add info to the report
         mess_strings.append(' > Loaded already preproccesed tomograms:')
-        mess_strings.append(' > LEFT CAM tomogram: {}'.format(left_cam_path))
-        mess_strings.append(' > RIGHT CAM tomogram: {}'.format(right_cam_path))
         mess_strings.append(' > Dimension of LEFT CAM tomogram [pixel]: ({}, {}, {})'.
                             format(shape_L[0], shape_L[1], shape_L[2]))
         mess_strings.append(' > Dimension of RIGHT CAM tomogram [pixel]: ({}, {}, {})'.
@@ -1008,10 +821,7 @@ def main(parser):
     else:
         mess_strings.append(Bcolors.OKBLUE + '\n*** Preprocessing informations:' + Bcolors.ENDC)
         mess_strings.append(' > Preprocessing steps:')
-        if output_voxel_size is not None:
-            mess_strings.append(' > Scaling to voxel size {} um'.format(output_voxel_size))
-        else:
-            mess_strings.append(' > No scaling applied, using original voxel size')
+        mess_strings.append(' > Scaling to voxel size {} um'.format(output_voxel_size))
         mess_strings.append(' > Rescaling histogram to maximum intensity {}'.format(max_intensity))
 
         print('Preprocessing is running....')
@@ -1019,19 +829,19 @@ def main(parser):
                                                         output_voxel_size=output_voxel_size,
                                                         max_intensity=max_intensity,
                                                         _save_preprocessed_tomograms=_save_preprocessed_tomograms,
-                                                        outfolderpath=preproc_output_fpath,
+                                                        outfolderpath=output_folderpath,
                                                         cam_name='left_cam',
                                                         _eight_bit=_eight_bit)
         R_ready_zyx, shape_R = single_cam_preprocessing(right_cam_path, parameters,
                                                         output_voxel_size=output_voxel_size,
                                                         max_intensity=max_intensity,
                                                         _save_preprocessed_tomograms=_save_preprocessed_tomograms,
-                                                        outfolderpath=preproc_output_fpath,
+                                                        outfolderpath=output_folderpath,
                                                         cam_name='right_cam',
                                                         _eight_bit=_eight_bit)
         print('Preprocessing done.')
         if _save_preprocessed_tomograms:
-            mess_strings.append('Preprocessed tomograms saved in {}'.format(preproc_output_fpath))
+            mess_strings.append('Preprocessed tomograms saved in {}'.format(output_folderpath))
 
     # print and add to .txt
     write_on_txt(mess_strings, report_filepath, _print=True, mode='a')
@@ -1047,6 +857,10 @@ def main(parser):
     z_slicing         = z_slicing if z_slicing else 1
 
     print(Bcolors.OKBLUE + '\n\n*** Evaluating SNR with radius ratio: {} '.format(fft_radius) + Bcolors.ENDC)
+
+
+    for i in range(2):
+
     L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready_zyx, _segm=_segm, fov_portion=(0, 0.8), z_slicing=z_slicing, radius=fft_radius, _plot=_plot, _verb=_verb)
     R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready_zyx, _segm=_segm, fov_portion=(0, 0.8), z_slicing=z_slicing, radius=fft_radius, _plot=_plot, _verb=_verb)
 
@@ -1057,23 +871,8 @@ def main(parser):
                    _save=_save_final_plots, _output_dirpath=base_dirpath,
                    fname='snr_no_segm_step{}_radius{}.png'.format(z_slicing, fft_radius))
 
-    #plot log
-    # plot_snrs_dual(L_snr_image, R_snr_image, _log=True, _segm=False, xlabel='Z', ylabel='SNR',
-    #                labels=('LeftCAM SNR (Image - no segm)', 'RightCAM SNR (Image - no segm)'),
-    #                title='Log10(SNR) along Z - step: {}; FFT ratio: {}'.format(z_slicing, radius),
-    #                _save=_save_final_plots, _output_dirpath=base_dirpath,
-    #                fname='log10_snr_no_segm_step{}_radius{}.png'.format(z_slicing, radius))
-
-    # plot_snrs_dual(L_snr_image, L_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR',
-    #                labels=('LeftCAM SNR (Image - no segm)', 'LeftCAM SNR (Sample - segmented)'),
-    #                title='LeftCAM - SNR along Z - step: {}; FFT ratio 0.2'.format(z_slicing))
-    #
-    # plot_snrs_dual(R_snr_image, R_snr_sample, _segm=_segm, xlabel='z', ylabel='SNR',
-    #                  labels=('RightCAM SNR (Image - no segm)', 'RightCAM SNR (Sample - segmented)'),
-    #                  title='RightCAM - SNR along Z - step: {}; FFT ratio 0.2'.format(z_slicing))
-
     # save results in a file
-    snr_values_out_path = os.path.join(preproc_output_fpath, 'snr_values')
+    snr_values_out_path = os.path.join(output_folderpath, 'snr_values')
     if not os.path.exists(snr_values_out_path):
         os.makedirs(snr_values_out_path)
     with open(os.path.join(snr_values_out_path, 'L_snr_image_radius{}_zstep{}.txt'.format(fft_radius, z_slicing)), 'w') as file:
@@ -1090,7 +889,6 @@ def main(parser):
         mess_strings.append(' \n*** Using z_fusion value passed as argument: {}'.format(z_fusion))
 
     write_on_txt(mess_strings, report_filepath, _print=True, mode='a')
-    mess_strings.clear()
 
     # ===============================================================================================
     # ========================== REALIGNMENT ON XY PLANE and SCALE between CAMS  ====================
@@ -1101,7 +899,7 @@ def main(parser):
 
     # plot the two frames in red and green on the same plot with two different color to check the alignment
     plot_rgb_frames(L_switch_zframe, R_switch_zframe, title='Alignment Check - Best Z for Fusion: {}'.format(z_fusion),
-                    red_ch='Left CAM', green_ch='Right CAM', outpath=preproc_output_fpath, _save=_save_final_plots)
+                    red_ch='Left CAM', green_ch='Right CAM', outpath=output_folderpath, _save=_save_final_plots)
 
     # estimate translation and scale between L_switch_zframe and R_switch_zframe
     print("Evaluating the xy translation and scale factor of Right tomogram respect to left...")
@@ -1113,15 +911,14 @@ def main(parser):
     mess_strings.append(
         ' \n*** Translation (tx, ty) of right cam to left: ({}, {})'.format(right_tx, right_ty))
 
-    # apply translation and scale to the right frame
+    # apply translation and scale to the right tomogram
     R_switch_frame_adjusted = apply_scale_and_translation(R_switch_zframe, right_scale_xy, right_tx, right_ty)
     plot_rgb_frames(L_switch_zframe, R_switch_frame_adjusted, title='After registration - frames at z: {}'.format(z_fusion),
-                    red_ch='Left CAM', green_ch='Right CAM', outpath=preproc_output_fpath, _save=_save_final_plots)
+                    red_ch='Left CAM', green_ch='Right CAM', outpath=output_folderpath, _save=_save_final_plots)
 
     # apply the same transformation to the whole tomogram
     print('Realigning the whole tomogram...')
     R_zyx_adjusted = transform_volume_xy(R_ready_zyx, right_scale_xy, right_tx, right_ty, interpolation=cv2.INTER_LINEAR)
-    del R_ready_zyx  # Free memory
     print('Done.')
 
     # ===============================================================================================
@@ -1129,17 +926,11 @@ def main(parser):
     print('Fusing the two tomograms...')
     plot_rgb_frames(L_ready_zyx[z_fusion], R_zyx_adjusted[z_fusion],
                     title='3D Realignment Check before fusion - Z: {}'.format(z_fusion),
-                    red_ch='Left CAM', green_ch='Right CAM', outpath=preproc_output_fpath, _save=_save_final_plots)
+                    red_ch='Left CAM', green_ch='Right CAM', outpath=output_folderpath, _save=_save_final_plots)
     fused_tomogram = fuse_dual_tomograms(top=R_zyx_adjusted, bottom=L_ready_zyx, z_switch=z_fusion)
-    del L_ready_zyx, R_zyx_adjusted  # Free memory
 
     print('Saving the fused tomogram...')
-    fused_fpath = save_fused_tomogram(fused_tomogram=fused_tomogram, output_folderpath=output_folderpath,
-                                        _skip_preprocessing=_skip_preprocessing, output_voxel_size=output_voxel_size,
-                                      parameters=parameters, sample_name='fused_tomogram')
-    print('Done.')
-    mess_strings.append(
-        'Fused tomogram saved in: \n{}'.format(fused_fpath))
+    save_fused_tomogram(fused_tomogram, output_folderpath)
 
     write_on_txt(mess_strings, report_filepath, _print=True, mode='a')
     # clear list of strings
@@ -1173,9 +964,9 @@ if __name__ == '__main__':
                         type=int, nargs=1, required=False, default=None,
                         help='If passed, fuse tomograms at this z instead of evaluate best z by image quality')
     # add the desidered voxel size of the preprocessed tomograms
-    parser.add_argument('-vs', '--voxel_size', default=None,
+    parser.add_argument('-vs', '--voxel_size', default=[6],
                         type=float, nargs=1, required=False,
-                        help='Output voxel size of the preprocessed (and fused) tomograms in micrometers. If not passed, no scaling is applied')
+                        help='Output voxel size of the preprocessed (and fused) tomograms in micrometers')
     # add parameter of max intensity to rescale histogram
     parser.add_argument('-mi', '--max_intensity', default=[5000],
                         type=float, nargs=1, required=False,
@@ -1193,7 +984,7 @@ if __name__ == '__main__':
                         action='store_true', default=True,
                         help='Convert to 8 bit')
     # add radius for SNR evaluation
-    parser.add_argument('--fft_radius',
+    parser.add_argument('-r', '--fft_radius',
                         type=float, nargs=1, required=False, default=[0.1],
                         help='Radius for SNR evaluation (default: 0.1)')
     main(parser)
