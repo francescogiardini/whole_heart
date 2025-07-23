@@ -292,10 +292,12 @@ def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_slicing=1
 
     snr_image_values = {}  # dict z -> contrast value of images
     snr_sample_values = {}  # dict absolute_z -> contrast value of the sample area
-    # TODO CHANGE HERE
+
+    if z_slicing is None or z_slicing <= 0:
+        z_slicing = int(tomogram.shape[0] / 10)  # default slicing every 50 frames
+    print('Selected z slicing: ', z_slicing)
+
     z_selected = range(0, tomogram.shape[0], z_slicing)
-    # z_selected = (20, 90)
-    print('Selected z values: ', list(z_selected))
 
     for z in z_selected:
         print(' - z = {}'.format(z))
@@ -346,10 +348,12 @@ def find_crossing_z(left_data, right_data):
     left_values = list(left_data.values())
     right_values = list(right_data.values())
 
-    for i in range(10, len(z_values) - 10):
+    # scansiona i valori di z (partendo dal 20% e fermandosi all'80%) e trova il primo punto in cui left_values supera right_values
+    for i in range(int(len(z_values) * 0.2), int(len(z_values) * 0.8)):
         if left_values[i] > right_values[i]:
             return z_values[i]
-    return 1
+    # fail
+    return -1
 
 
 def evaluate_best_z(left_data, right_data):
@@ -582,7 +586,7 @@ def resample_volume_slicewise(tomogram, scale_z, scale_xy):
     return rescaled
 
 
-def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, max_intensity=None,
+def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, _scale_is_needed=False, max_intensity=None,
                              _save_preprocessed_tomograms=False, outfolderpath=None, cam_name=None, _eight_bit=False):
     """
     Preprocess a single camera tomogram.
@@ -603,12 +607,11 @@ def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, ma
     # ===============================
     # SCALING DIMENSIONS
     # ===============================
-    if output_voxel_size:
-        scale_xy = parameters['px_size_xy'] / output_voxel_size
-        scale_z = parameters['px_size_z'] / output_voxel_size
+    if _scale_is_needed:
+        scale_xy = parameters['px_size_xy'] / output_voxel_size[1]
+        scale_z = parameters['px_size_z'] / output_voxel_size[0]
         # Apply scaling
-        print('Scaling tomogram to voxel size {}...'.format(output_voxel_size))
-
+        print('Scaling tomogram to voxel size: ', output_voxel_size, '  ...')
         # DEPRECATED (Memory intensive), see below
         # tomogram_scaled = zoom(tomogram, (scale_z, scale_xy, scale_xy), order=1)  # Linear interpolation
         tomogram_scaled = resample_volume_slicewise(tomogram, scale_z, scale_xy)
@@ -616,7 +619,7 @@ def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, ma
         gc.collect()
     else:
         # Not Apply scaling
-        print('No scaling applied. Using original voxel size.')
+        print('No scaling applied. Using original voxel size: ', output_voxel_size)
         tomogram_scaled = tomogram
 
     # ===============================
@@ -636,9 +639,13 @@ def single_cam_preprocessing(imgseq_path, parameters, output_voxel_size=None, ma
 
     # Save the preprocessed tomogram if required
     if _save_preprocessed_tomograms and outfolderpath and cam_name:
-        # outfname = cam_name + '_ds{}um_eq{}.tif'.format(int(output_voxel_size), int(max_intensity))
-        outfname = cam_name + (
-            '_ds{}um'.format(int(output_voxel_size)) if output_voxel_size is not None else '') + '_eq{}.tif'.format(
+
+        # prepare the out fname
+        if _scale_is_needed:
+            ds_suffix = '_ps{:.2f}_{:.2f}_{:.2f}um'.format(output_voxel_size[0], output_voxel_size[1], output_voxel_size[2])
+        else:
+            ds_suffix = ''
+        outfname = cam_name + ds_suffix + '_eq{}.tif'.format(
             int(max_intensity))
         outfolderpath = os.path.join(outfolderpath, outfname)
         print('Saving preprocessed tomogram to {}...'.format(outfolderpath))
@@ -685,19 +692,22 @@ def fuse_dual_tomograms(top: np.ndarray, bottom: np.ndarray, z_switch: int) -> n
     Returns:
         np.ndarray: fused tomogram (Z, Y, X)
     """
+    # define the depths of top and bottom tomograms
     z_top = z_switch + 1
     z_bottom = bottom.shape[0] - z_top
 
+    # define the output shape and prepare empty array
     output_shape = (z_top + z_bottom, *top.shape[1:])
     fused = np.empty(output_shape, dtype=top.dtype)
 
+    # Fill the fused tomogram
     fused[:z_top] = top[:z_top]
     fused[z_top:] = bottom[z_top:]
 
     return fused
 
 
-def save_tomogram_for_fiji(tomogram, output_folderpath, voxel_size, fname='', axes='ZYX'):
+def save_tomogram_for_fiji(tomogram, output_folderpath, voxel_size, fname='sample', axes='ZYX'):
     """
     Salva un tomogramma 3D come file TIFF compatibile con Fiji.
 
@@ -721,8 +731,7 @@ def save_tomogram_for_fiji(tomogram, output_folderpath, voxel_size, fname='', ax
         raise ValueError("voxel_size deve essere un singolo valore o una tupla di 3 valori (Z, Y, X).")
 
     # Salva l'array 3D come file TIFF
-    fname = f"{fname}_tomogramZYX.tif" if fname and not fname.endswith('.tif') else (
-        fname if fname else "tomogramZYX.tif")
+    fname = '{}_fused_ps{}_{}_{}um.tif'.format(fname, voxel_size[0], voxel_size[1], voxel_size[2])
     output_filepath = os.path.join(output_folderpath, fname)
 
     imwrite(output_filepath,
@@ -775,30 +784,28 @@ def save_fused_tomogram(fused_tomogram, output_folderpath, _skip_preprocessing,
 '''
 
 
-def save_fused_tomogram(fused_tomogram, output_folderpath, _skip_preprocessing,
-                        output_voxel_size, parameters, sample_name=''):
+def save_fused_tomogram(fused_tomogram, output_folderpath,
+                        out_voxel_size, parameters, sample_name=''):
     """
     Salva il tomogramma fuso utilizzando la funzione save_tomogram_for_fiji.
 
     :param fused_tomogram: numpy array del tomogramma fuso (z, y, x)
     :param output_folderpath: stringa, percorso della cartella di output
     :param _skip_preprocessing: booleano, indica se saltare il preprocessing
-    :param output_voxel_size: dimensione del voxel in micrometri
+    :param out_voxel_size: dimensione del voxel in micrometri
     :param parameters: dizionario con parametri aggiuntivi
     :param sample_name: nome del campione per il file di output (opzionale)
     :return: percorso del file salvato
     """
-    # Determina la dimensione del voxel
-    if _skip_preprocessing:
-        voxel_size = (parameters['px_size_z'], parameters['px_size_xy'], parameters['px_size_xy'])
-    else:
-        voxel_size = (output_voxel_size, output_voxel_size, output_voxel_size)
+
+
+    print("voxel_size for saving: ", out_voxel_size)
 
     # Salva il tomogramma fuso come file TIFF compatibile con Fiji
     output_filepath = save_tomogram_for_fiji(
         tomogram=fused_tomogram,
         output_folderpath=output_folderpath,
-        voxel_size=voxel_size,
+        voxel_size=out_voxel_size,
         fname=sample_name,
         axes='ZYX'
     )
@@ -916,6 +923,64 @@ def convert_16bit_to_8bit_inplace(img16):
 
     return img8
 
+def manage_desired_voxel_size(voxel_size, skip_preprocessing, parameters, voxel_size_fpath=None):
+    """
+    Manage the input voxel size based on the provided arguments.
+
+    :param voxel_size: list or None, input voxel size
+    :param skip_preprocessing: boolean, whether to skip preprocessing
+    :return: voxel size as a float or tuple of floats
+    """
+
+    if skip_preprocessing:
+        # load dict from voxel_size_fpath
+        with open(voxel_size_fpath, 'r') as f:
+            voxel_size_dict = json.load(f)
+        out_voxel_size = (
+        float(voxel_size_dict['px_size_z']), float(voxel_size_dict['px_size_xy']), float(voxel_size_dict['px_size_xy']))
+        _scale_is_needed = False
+        return out_voxel_size, _scale_is_needed
+
+    else:
+        if voxel_size is None:
+            # use the original voxel size from parameters
+            out_voxel_size = (float(parameters['px_size_z']), float(parameters['px_size_xy']), float(parameters['px_size_xy']))
+            _scale_is_needed = False
+            return out_voxel_size, _scale_is_needed
+
+        else:
+            if len(voxel_size) == 1:
+                 # isotropic voxel size
+                 out_voxel_size = (float(voxel_size[0]), float(voxel_size[0]), float(voxel_size[0]))
+                 _scale_is_needed = True
+                 return out_voxel_size, _scale_is_needed
+
+            if len(voxel_size) == 3:
+                # check if voxel_size is the same of input data
+                if voxel_size[0] != parameters['px_size_z'] or voxel_size[1] != parameters['px_size_xy'] or voxel_size[2] != parameters['px_size_xy']:
+                    # scaling is needed
+                    _scale_is_needed = True
+                    return voxel_size, _scale_is_needed
+                else:
+                    # no scaling needed
+                    _scale_is_needed = False
+                    return voxel_size, _scale_is_needed
+
+
+def save_output_voxel_size_as_dict(output_voxel_size, preproc_output_fpath):
+    """    Save the output voxel size in a JSON file.
+    :param output_voxel_size: tuple, voxel size in (px_size_z, px_size_xy, px_size_xy)
+    :param preproc_output_fpath: string, path to the preprocessing output folder
+    :param mess_strings: list, messages to be logged
+    """
+
+    # save output_voxel_size in a file as dict
+    voxel_size_dict = {'px_size_xy': output_voxel_size[1], 'px_size_z': output_voxel_size[0]}
+    voxel_size_fpath = os.path.join(preproc_output_fpath, 'preprocess_voxel_size.json')
+    with open(voxel_size_fpath, 'w') as f:
+        json.dump(voxel_size_dict, f)
+    return voxel_size_fpath
+
 
 
 def main(parser):
@@ -929,20 +994,25 @@ def main(parser):
     left_cam_path = manage_path_argument(args.leftCAM_path)
     right_cam_path = manage_path_argument(args.rightCAM_path)
     parameter_filepath = args.parameters_filepath[0]
+    sample_name = args.sample_name
     base_dirpath = os.path.dirname(left_cam_path)
     output_folderpath = args.output_folderpath[0] if args.output_folderpath else base_dirpath
     z_fusion = args.z_fusion[0] if args.z_fusion else None
     _skip_preprocessing = args.skip_preprocessing
-    output_voxel_size = args.voxel_size[0] if args.voxel_size else None
     max_intensity = args.max_intensity[0] if args.max_intensity else None
     _save_preprocessed_tomograms = args.save_preprocessed_tomograms
     z_slicing = args.z_slicing[0] if args.z_slicing else None
     _eight_bit = args.eight_bit
     fft_radius = args.fft_radius[0]
 
-    # check if the output folder exists
-    preproc_output_fpath = os.path.join(output_folderpath, 'preprocessing')
-    create_fldr(preproc_output_fpath)
+    if not _skip_preprocessing:
+        # create preprocessing folder
+        preproc_output_fpath = os.path.join(output_folderpath, 'preprocessing')
+        create_fldr(preproc_output_fpath)
+        voxel_size_fpath = None
+    else:
+        preproc_output_fpath = base_dirpath
+        voxel_size_fpath = os.path.join(preproc_output_fpath, 'preprocess_voxel_size.json')
 
     # check if the input files exist
     if not os.path.exists(left_cam_path):
@@ -957,7 +1027,7 @@ def main(parser):
     mess_strings = prepare_initial_report(args, preproc_output_fpath, report_filepath)
 
     # print to screen, create .txt file and write into .txt file all temporal information
-    write_on_txt(mess_strings, report_filepath, _print=True, mode='w')
+    write_on_txt(mess_strings, report_filepath, _print=True, mode='a')
     # clear list of strings
     mess_strings.clear()
 
@@ -973,8 +1043,10 @@ def main(parser):
         parameters[p_name] = float(param_values[i])
         mess_strings.append('> {} - {}'.format(p_name, parameters[p_name]))
 
+    output_voxel_size, _scale_is_needed = manage_desired_voxel_size(args.voxel_size, _skip_preprocessing, parameters, voxel_size_fpath)
+
     # print to screen, create .txt file and write into .txt file all temporal informations
-    write_on_txt(mess_strings, report_filepath, _print=True, mode='w')
+    write_on_txt(mess_strings, report_filepath, _print=True, mode='a')
     # clear list of strings
     mess_strings.clear()
 
@@ -990,6 +1062,7 @@ def main(parser):
         L_ready_zyx, shape_L = load_tiff_stack_zyx(left_cam_path) # (r, c, z) -> (z, y, x)
         print('Loading RIGHT_CAM  tomogram from {}...'.format(right_cam_path))
         R_ready_zyx, shape_R = load_tiff_stack_zyx(right_cam_path) # (r, c, z) -> (z, y, x)
+
         print('Done.')
 
         # add info to the report
@@ -1002,16 +1075,20 @@ def main(parser):
                             format(shape_R[0], shape_R[1], shape_R[2]))
     else:
         mess_strings.append(Bcolors.OKBLUE + '\n*** Preprocessing informations:' + Bcolors.ENDC)
-        mess_strings.append(' > Preprocessing steps:')
-        if output_voxel_size is not None:
-            mess_strings.append(' > Scaling to voxel size {} um'.format(output_voxel_size))
+        if _scale_is_needed:
+            mess_strings.append(' > Scaling to voxel size [ZYX, um]: {}, {}, {}'.format(output_voxel_size[0], output_voxel_size[1], output_voxel_size[2]))
         else:
-            mess_strings.append(' > No scaling applied, using original voxel size')
+            mess_strings.append(' > No scaling applied, using original voxel size [ZYX, um]: {}, {}, {}'.format(output_voxel_size[0], output_voxel_size[1], output_voxel_size[2]))
         mess_strings.append(' > Rescaling histogram to maximum intensity {}'.format(max_intensity))
+        # print and add to .txt
+        write_on_txt(mess_strings, report_filepath, _print=True, mode='a')
+        # clear list of strings
+        mess_strings.clear()
 
         print('Preprocessing is running....')
         L_ready_zyx, shape_L = single_cam_preprocessing(left_cam_path, parameters,
                                                         output_voxel_size=output_voxel_size,
+                                                        _scale_is_needed=_scale_is_needed,
                                                         max_intensity=max_intensity,
                                                         _save_preprocessed_tomograms=_save_preprocessed_tomograms,
                                                         outfolderpath=preproc_output_fpath,
@@ -1019,14 +1096,19 @@ def main(parser):
                                                         _eight_bit=_eight_bit)
         R_ready_zyx, shape_R = single_cam_preprocessing(right_cam_path, parameters,
                                                         output_voxel_size=output_voxel_size,
+                                                        _scale_is_needed=_scale_is_needed,
                                                         max_intensity=max_intensity,
                                                         _save_preprocessed_tomograms=_save_preprocessed_tomograms,
                                                         outfolderpath=preproc_output_fpath,
                                                         cam_name='right_cam',
                                                         _eight_bit=_eight_bit)
+
         print('Preprocessing done.')
         if _save_preprocessed_tomograms:
-            mess_strings.append('Preprocessed tomograms saved in {}'.format(preproc_output_fpath))
+            voxel_size_fpath = save_output_voxel_size_as_dict(output_voxel_size, preproc_output_fpath)
+            mess_strings.append(
+                ' Voxel size of preprocessed LEFT and RIGHT tomograms saved as: \n{}'.format(voxel_size_fpath))
+            mess_strings.append('Preprocessed tomograms saved in:  \n{}'.format(preproc_output_fpath))
 
     # print and add to .txt
     write_on_txt(mess_strings, report_filepath, _print=True, mode='a')
@@ -1039,9 +1121,8 @@ def main(parser):
     _save_final_plots = True
     _verb             = False
     _segm             = False
-    z_slicing         = z_slicing if z_slicing else 1
 
-    print(Bcolors.OKBLUE + '\n\n*** Evaluating SNR with radius ratio: {} '.format(fft_radius) + Bcolors.ENDC)
+    print(Bcolors.OKBLUE + '\n*** Evaluating SNR with radius ratio: {} '.format(fft_radius) + Bcolors.ENDC)
     L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready_zyx, _segm=_segm, fov_portion=(0, 0.8), z_slicing=z_slicing, radius=fft_radius, _plot=_plot, _verb=_verb)
     R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready_zyx, _segm=_segm, fov_portion=(0, 0.8), z_slicing=z_slicing, radius=fft_radius, _plot=_plot, _verb=_verb)
 
@@ -1049,7 +1130,7 @@ def main(parser):
     plot_snrs_dual(L_snr_image, R_snr_image, _log=False, _segm=False, xlabel='Z', ylabel='SNR',
                    labels=('LeftCAM SNR (Image - no segm)', 'RightCAM SNR (Image - no segm)'),
                    title='SNR along Z - step: {}; FFT ratio: {}'.format(z_slicing, fft_radius),
-                   _save=_save_final_plots, _output_dirpath=base_dirpath,
+                   _save=_save_final_plots, _output_dirpath=preproc_output_fpath,
                    fname='snr_no_segm_step{}_radius{}.png'.format(z_slicing, fft_radius))
 
     #plot log
@@ -1102,11 +1183,11 @@ def main(parser):
     print("Evaluating the xy translation and scale factor of Right tomogram respect to left...")
     right_scale_xy, right_tx, right_ty = estimate_isotropic_scaling_and_translation(L_switch_zframe, R_switch_zframe)
     print('Estimated scale factor: {}'.format(right_scale_xy))
-    print('Estimated translation (tx, ty): ({}, {})'.format(right_tx, right_ty))
+    print('Estimated translation (tx, ty)[um]: ({}, {}) um'.format(right_tx * output_voxel_size[2], right_ty * output_voxel_size[2]))
     mess_strings.append(
         ' \n*** Scaling factor of right cam to left: {}'.format(right_scale_xy))
     mess_strings.append(
-        ' \n*** Translation (tx, ty) of right cam to left: ({}, {})'.format(right_tx, right_ty))
+        ' \n*** Translation (tx, ty) [um] of right cam to left: ({}, {}) um'.format(right_tx * output_voxel_size[2], right_ty * output_voxel_size[2]))
 
     # apply translation and scale to the right frame
     R_switch_frame_adjusted = apply_scale_and_translation(R_switch_zframe, right_scale_xy, right_tx, right_ty)
@@ -1130,8 +1211,8 @@ def main(parser):
 
     print('Saving the fused tomogram...')
     fused_fpath = save_fused_tomogram(fused_tomogram=fused_tomogram, output_folderpath=output_folderpath,
-                                        _skip_preprocessing=_skip_preprocessing, output_voxel_size=output_voxel_size,
-                                      parameters=parameters, sample_name='fused_tomogram')
+                                      out_voxel_size=output_voxel_size,
+                                      parameters=parameters, sample_name=sample_name)
     print('Done.')
     mess_strings.append(
         'Fused tomogram saved in: \n{}'.format(fused_fpath))
@@ -1156,6 +1237,10 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--parameters-filepath',
                         nargs='+', required=True,
                         help='filepath of parameters.txt file')
+    # add sample_mname
+    parser.add_argument('-sm', '--sample_name',
+                        type=str, nargs=1, required=False, default='sample',
+                        help='Name of the sample. Default: "sample". ')
     # add output folder if needed
     parser.add_argument('-o', '--output_folderpath',
                         type=str, nargs=1, required=False,
@@ -1169,8 +1254,8 @@ if __name__ == '__main__':
                         help='If passed, fuse tomograms at this z instead of evaluate best z by image quality')
     # add the desidered voxel size of the preprocessed tomograms
     parser.add_argument('-vs', '--voxel_size', default=None,
-                        type=float, nargs=1, required=False,
-                        help='Output voxel size of the preprocessed (and fused) tomograms in micrometers. If not passed, no scaling is applied')
+                        type=float, nargs='+', required=False,
+                        help='Output voxel size (ZYX, in um). If not passed, no scaling is applied. Example: "6.0" for isotropic scaling or "6.0 6.0 10.0" for anisotropic scaling.')
     # add parameter of max intensity to rescale histogram
     parser.add_argument('-mi', '--max_intensity', default=[5000],
                         type=float, nargs=1, required=False,
@@ -1181,7 +1266,7 @@ if __name__ == '__main__':
                         help='Save preprocessed tomograms')
     # add parameter of z_slicing for contrast evaluation
     parser.add_argument('-zs', '--z_slicing',
-                        type=int, nargs=1, required=False, default=[50],
+                        type=int, nargs=1, required=False, default=None,
                         help='Z slicing step for contrast evaluation')
     # add boolean parameter if convert to 8 bit or not
     parser.add_argument('-bit', '--eight_bit',
