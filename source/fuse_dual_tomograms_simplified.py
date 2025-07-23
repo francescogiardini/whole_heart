@@ -1257,7 +1257,7 @@ if __name__ == '__main__':
                         type=float, nargs='+', required=False,
                         help='Output voxel size (ZYX, in um). If not passed, no scaling is applied. Example: "6.0" for isotropic scaling or "6.0 6.0 10.0" for anisotropic scaling.')
     # add parameter of max intensity to rescale histogram
-    parser.add_argument('-mi', '--max_intensity', default=[5000],
+    parser.add_argument('-mi', '--max_intensity', default=[65000],
                         type=float, nargs=1, required=False,
                         help='Max intensity to rescale histogram')
     # addarameter boolean if save preprocessed single views or not
