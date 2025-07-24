@@ -379,7 +379,7 @@ def plot_rgb_frames(frame_red, frame_green, title='RGB Plot', red_ch=None, green
 
     # Aggiorna il titolo con le etichette dei canali
     if red_ch and green_ch:
-        title += f" (R: {red_ch}, G: {green_ch})"
+        title += f"Red{red_ch} Green{green_ch})"
 
     # Create an RGB image
     rgb_image = np.zeros((frame_red.shape[0], frame_red.shape[1], 3), dtype=np.uint8)
@@ -1181,7 +1181,7 @@ def main(parser):
     R_switch_zframe = R_ready_zyx[z_fusion]
 
     # plot the two frames in red and green on the same plot with two different color to check the alignment
-    plot_rgb_frames(L_switch_zframe, R_switch_zframe, title='Alignment Check - Best Z for Fusion: {}'.format(z_fusion),
+    plot_rgb_frames(L_switch_zframe, R_switch_zframe, title='Before registration at z {}'.format(z_fusion),
                     red_ch='Left CAM', green_ch='Right CAM', outpath=preproc_output_fpath, _save=_save_final_plots)
 
     # estimate translation and scale between L_switch_zframe and R_switch_zframe
@@ -1196,7 +1196,7 @@ def main(parser):
 
     # apply translation and scale to the right frame
     R_switch_frame_adjusted = apply_scale_and_translation(R_switch_zframe, right_scale_xy, right_tx, right_ty)
-    plot_rgb_frames(L_switch_zframe, R_switch_frame_adjusted, title='After registration - frames at z: {}'.format(z_fusion),
+    plot_rgb_frames(L_switch_zframe, R_switch_frame_adjusted, title='After registration',
                     red_ch='Left CAM', green_ch='Right CAM', outpath=preproc_output_fpath, _save=_save_final_plots)
 
     # apply the same transformation to the whole tomogram
@@ -1209,7 +1209,7 @@ def main(parser):
     # ===================================== ACTUAL FUSION OF READY TOMOGRAMS  ==========================================
     print('Fusing the two tomograms...', end=' ')
     plot_rgb_frames(L_ready_zyx[z_fusion], R_zyx_adjusted[z_fusion],
-                    title='3D Realignment Check before fusion - Z: {}'.format(z_fusion),
+                    title='Frame from 3D tomograms before fusion',
                     red_ch='Left CAM', green_ch='Right CAM', outpath=preproc_output_fpath, _save=_save_final_plots)
     fused_tomogram = fuse_dual_tomograms(top=R_zyx_adjusted, bottom=L_ready_zyx, z_switch=z_fusion)
     print('Done.')
@@ -1251,9 +1251,9 @@ if __name__ == '__main__':
     # add FOV_portion
     parser.add_argument('-fov', '--field_of_view', default=[100],
                         type=float, nargs=1, required=False,
-                        help='Portion of the FoV where estimate image contrast. Example: "80" means the 80% of FoV from the top part. Default: 100')
+                        help='Portion of the FoV where estimate image contrast. Example: "80" means the 80 percent of FoV from the top part. Default: 100')
     parser.add_argument('-sp', '--skip_preprocessing',
-                        action='store_true',
+                        action='store_true', default=False,
                         help='Skip preprocessing step. If passed, LEFT and RIGHT input must be path of tiffiles of'
                              '8bit preprocessed tomograms')
     parser.add_argument('-z', '--z-fusion',
@@ -1266,10 +1266,10 @@ if __name__ == '__main__':
     # add parameter of max intensity to rescale histogram
     parser.add_argument('-mi', '--max_intensity', default=[65000],
                         type=float, nargs=1, required=False,
-                        help='Max intensity to rescale histogram')
+                        help='Max intensity to rescale histogram. Deafult: 65000')
     # addarameter boolean if save preprocessed single views or not
     parser.add_argument('-spt', '--save_preprocessed_tomograms',
-                        action='store_true', default=True,
+                        action='store_true', default=False,
                         help='Save preprocessed tomograms')
     # add parameter of z_slicing for contrast evaluation
     parser.add_argument('-zs', '--z_slicing',
