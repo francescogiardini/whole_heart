@@ -707,7 +707,7 @@ def fuse_dual_tomograms(top: np.ndarray, bottom: np.ndarray, z_switch: int) -> n
     return fused
 
 
-def save_tomogram_for_fiji(tomogram, output_folderpath, voxel_size, fname='sample', axes='ZYX'):
+def save_tomogram_for_fiji(tomogram, output_folderpath, voxel_size, fname='sample', axes='ZYX', _verb=False):
     """
     Salva un tomogramma 3D come file TIFF compatibile con Fiji.
 
@@ -744,6 +744,9 @@ def save_tomogram_for_fiji(tomogram, output_folderpath, voxel_size, fname='sampl
             },
             resolution=(1.0 / voxel_size[2], 1.0 / voxel_size[1]),  # XY resolution (from ZYX format)
             )
+    if _verb:
+        print(f"Tomogram saved with voxel size {voxel_size} and axes {axes} in: \n{output_filepath}")
+
     return output_filepath
 
 
@@ -785,7 +788,7 @@ def save_fused_tomogram(fused_tomogram, output_folderpath, _skip_preprocessing,
 
 
 def save_fused_tomogram(fused_tomogram, output_folderpath,
-                        out_voxel_size, parameters, sample_name=''):
+                        out_voxel_size, parameters, sample_name='', _verb=False):
     """
     Salva il tomogramma fuso utilizzando la funzione save_tomogram_for_fiji.
 
@@ -799,7 +802,7 @@ def save_fused_tomogram(fused_tomogram, output_folderpath,
     """
 
 
-    print("voxel_size for saving: ", out_voxel_size)
+    # print("voxel_size for saving: ", out_voxel_size)
 
     # Salva il tomogramma fuso come file TIFF compatibile con Fiji
     output_filepath = save_tomogram_for_fiji(
@@ -807,7 +810,8 @@ def save_fused_tomogram(fused_tomogram, output_folderpath,
         output_folderpath=output_folderpath,
         voxel_size=out_voxel_size,
         fname=sample_name,
-        axes='ZYX'
+        axes='ZYX',
+        _verb=_verb
     )
 
     return output_filepath
@@ -1195,33 +1199,32 @@ def main(parser):
                     red_ch='Left CAM', green_ch='Right CAM', outpath=preproc_output_fpath, _save=_save_final_plots)
 
     # apply the same transformation to the whole tomogram
-    print('Realigning the whole tomogram...')
+    print('Realigning the whole tomogram...', end=' ')
     R_zyx_adjusted = transform_volume_xy(R_ready_zyx, right_scale_xy, right_tx, right_ty, interpolation=cv2.INTER_LINEAR)
     del R_ready_zyx  # Free memory
     print('Done.')
 
     # ===============================================================================================
     # ===================================== ACTUAL FUSION OF READY TOMOGRAMS  ==========================================
-    print('Fusing the two tomograms...')
+    print('Fusing the two tomograms...', end=' ')
     plot_rgb_frames(L_ready_zyx[z_fusion], R_zyx_adjusted[z_fusion],
                     title='3D Realignment Check before fusion - Z: {}'.format(z_fusion),
                     red_ch='Left CAM', green_ch='Right CAM', outpath=preproc_output_fpath, _save=_save_final_plots)
     fused_tomogram = fuse_dual_tomograms(top=R_zyx_adjusted, bottom=L_ready_zyx, z_switch=z_fusion)
+    print('Done.')
     del L_ready_zyx, R_zyx_adjusted  # Free memory
 
     print('Saving the fused tomogram...')
     fused_fpath = save_fused_tomogram(fused_tomogram=fused_tomogram, output_folderpath=output_folderpath,
                                       out_voxel_size=output_voxel_size,
-                                      parameters=parameters, sample_name=sample_name)
-    print('Done.')
+                                      parameters=parameters, sample_name=sample_name, _verb=True)
     mess_strings.append(
         'Fused tomogram saved in: \n{}'.format(fused_fpath))
 
-    write_on_txt(mess_strings, report_filepath, _print=True, mode='a')
-    # clear list of strings
+    write_on_txt(mess_strings, report_filepath, _print=False, mode='a')
     mess_strings.clear()
 
-    print(Bcolors.OKBLUE + '\n\n**************** End Dual Tomogram Fusion ****************' + Bcolors.ENDC)
+    print(Bcolors.OKBLUE + '\n**************** End Dual Tomogram Fusion ****************\n\n' + Bcolors.ENDC)
     return None
 
 
@@ -1248,7 +1251,7 @@ if __name__ == '__main__':
     parser.add_argument('-sp', '--skip_preprocessing',
                         action='store_true',
                         help='Skip preprocessing step. If passed, LEFT and RIGHT input must be path of tiffiles of'
-                             '8bit - 6um pixel size preprocessed tomograms')
+                             '8bit preprocessed tomograms')
     parser.add_argument('-z', '--z-fusion',
                         type=int, nargs=1, required=False, default=None,
                         help='If passed, fuse tomograms at this z instead of evaluate best z by image quality')
