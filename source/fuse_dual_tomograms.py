@@ -1008,6 +1008,7 @@ def main(parser):
     z_slicing = args.z_slicing[0] if args.z_slicing else None
     _eight_bit = args.eight_bit
     fft_radius = args.fft_radius[0]
+    fov_perc = args.field_of_view[0]
 
     if not _skip_preprocessing:
         # create preprocessing folder
@@ -1127,8 +1128,8 @@ def main(parser):
     _segm             = False
 
     print(Bcolors.OKBLUE + '\n*** Evaluating SNR with radius ratio: {} '.format(fft_radius) + Bcolors.ENDC)
-    L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready_zyx, _segm=_segm, fov_portion=(0, 0.8), z_slicing=z_slicing, radius=fft_radius, _plot=_plot, _verb=_verb)
-    R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready_zyx, _segm=_segm, fov_portion=(0, 0.8), z_slicing=z_slicing, radius=fft_radius, _plot=_plot, _verb=_verb)
+    L_snr_image, L_snr_sample = evaluate_snr_along_z(L_ready_zyx, _segm=_segm, fov_portion=(0, fov_perc/100), z_slicing=z_slicing, radius=fft_radius, _plot=_plot, _verb=_verb)
+    R_snr_image, R_snr_sample = evaluate_snr_along_z(R_ready_zyx, _segm=_segm, fov_portion=(0, fov_perc/100), z_slicing=z_slicing, radius=fft_radius, _plot=_plot, _verb=_verb)
 
     # double tomogram, double snr
     plot_snrs_dual(L_snr_image, R_snr_image, _log=False, _segm=False, xlabel='Z', ylabel='SNR',
@@ -1240,7 +1241,6 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--parameters-filepath',
                         nargs='+', required=True,
                         help='filepath of parameters.txt file')
-    # add sample_mname
     parser.add_argument('-sm', '--sample_name',
                         type=str, nargs=1, required=False, default='sample',
                         help='Name of the sample. Default: "sample". ')
@@ -1248,6 +1248,10 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--output_folderpath',
                         type=str, nargs=1, required=False,
                         help='Path to the output folder')
+    # add FOV_portion
+    parser.add_argument('-fov', '--field_of_view', default=[100],
+                        type=float, nargs=1, required=False,
+                        help='Portion of the FoV where estimate image contrast. Example: "80" means the 80% of FoV from the top part. Default: 100')
     parser.add_argument('-sp', '--skip_preprocessing',
                         action='store_true',
                         help='Skip preprocessing step. If passed, LEFT and RIGHT input must be path of tiffiles of'
