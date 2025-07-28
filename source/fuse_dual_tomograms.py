@@ -1016,7 +1016,7 @@ def main(parser):
         create_fldr(preproc_output_fpath)
         voxel_size_fpath = None
     else:
-        preproc_output_fpath = base_dirpath
+        preproc_output_fpath = output_folderpath
         voxel_size_fpath = os.path.join(preproc_output_fpath, 'preprocess_voxel_size.json')
 
     # check if the input files exist
