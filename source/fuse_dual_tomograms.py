@@ -269,7 +269,7 @@ def plot_snr(xl, yl, xlabel, ylabel, title):
     return None
 
 
-def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_slicing=10, radius=0.2, _plot=False, _verb=False):
+def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_slicing=None, radius=0.2, _plot=False, _verb=False):
     '''
     Evaluate snr on xy frames (every z_step frames) of the tomogram and return a list of contrast values
     :param tomogram: numpy array of the tomogram (z, y, x)
@@ -286,15 +286,15 @@ def evaluate_snr_along_z(tomogram, _segm=True, fov_portion=(0, 0.8), z_slicing=1
     if _plot: plot_grayscale_image(tomogram[z_half], title='Z={} - Before Cropping Fov'.format(z_half), vmin=0,
                                    vmax=255)
 
-    # if fov_portion is not 0 and 1, evaluate contrast only on the portion of the field of view
-    tomogram = crop_fov(tomogram, fov_portion)
+    if fov_portion is not None and fov_portion != (0, 1):
+        tomogram = crop_fov(tomogram, fov_portion)
     if _plot: plot_grayscale_image(tomogram[z_half], title='After Cropping Fov', vmin=0, vmax=255)
 
     snr_image_values = {}  # dict z -> contrast value of images
     snr_sample_values = {}  # dict absolute_z -> contrast value of the sample area
 
     if z_slicing is None or z_slicing <= 0:
-        z_slicing = int(tomogram.shape[0] / 10)  # default slicing every 50 frames
+        z_slicing = int(tomogram.shape[0] / 100)  # default slicing every 1% of the depth (100 points)
     print('Selected z slicing: ', z_slicing)
 
     z_selected = range(0, tomogram.shape[0], z_slicing)
