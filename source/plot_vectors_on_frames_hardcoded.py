@@ -3,10 +3,8 @@ import os
 import time
 from PIL import Image
 from io import BytesIO
-import argparse
 
 from scipy import ndimage
-from skimage.exposure import equalize_adapthist as skimage_clahe
 # from zetastitcher import InputFile
 from tifffile import imread as imread
 
@@ -16,10 +14,7 @@ from custom_image_base_tool import print_info, normalize
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
-
-plt.rcParams['figure.figsize'] = (14, 14)
-
-Image.MAX_IMAGE_PIXELS = 300000000  # Alza il limite di pixel che può gestire per ongi immagine
+plt.rcParams['figure.figsize']=(14,14)
 
 
 def float_to_color(values, color_map=cm.viridis, _print_info=False):
@@ -32,9 +27,12 @@ def float_to_color(values, color_map=cm.viridis, _print_info=False):
 
 def chaos_normalizer(values, isolated_value=-1, assign='max'):
     new_vaues = np.copy(values)
+
     maxv = np.max(values[values >= 0])
     minv = np.min(values[values >= 0])
+
     new_vaues[new_vaues == isolated_value] = (maxv if (assign == 'max') else minv)
+
     return (new_vaues - minv) / (maxv - minv)
 
 
@@ -54,15 +52,15 @@ class Param:
     CELL_INFO = 'cell_info'  # 1 if block is analyzed, 0 if it is rejected by cell_threshold
     ORIENT_INFO = 'orient_info'  # 1 if block is analyzed, 0 if it is rejected by cell_threshold
     CELL_RATIO = 'cell_ratio'  # ratio between cell voxel and all voxel of block
-    INIT_COORD = 'init_coord'  # absolute coord of voxel block[0,0,0] in Volume
-    EW = 'ew'  # descending ordered eigenvalues.
-    EV = 'ev'  # column ev[:,i] is the eigenvector of the eigenvalue w[i].
-    STRENGHT = 'strenght'  # parametro forza del gradiente (w1 .=. w2 .=. w3)
+    INIT_COORD = 'init_coord'   # absolute coord of voxel block[0,0,0] in Volume
+    EW = 'ew'   # descending ordered eigenvalues.
+    EV = 'ev'   # column ev[:,i] is the eigenvector of the eigenvalue w[i].
+    STRENGHT = 'strenght'   # parametro forza del gradiente (w1 .=. w2 .=. w3)
     CILINDRICAL_DIM = 'cilindrical_dim'  # dimensionalità forma cilindrica (w1 .=. w2 >> w3)
     PLANAR_DIM = 'planar_dim'  # dimensionalità forma planare (w1 >> w2 .=. w3)
     FA = 'fa'  # fractional anisotropy (0-> isotropic, 1-> max anisotropy
     SUM_SHAPES = 'sum_shapes'  # def as: (fa + planar_dim + cilindrical_dim)
-    LOCAL_DISARRAY = 'local_disarray'  # local_disarray
+    LOCAL_DISARRAY = 'local_disarray'   # local_disarray
     LOCAL_DISARRAY_W = 'local_disarray_w'  # local_disarray using FA as weight for the versors
 
 
@@ -91,7 +89,7 @@ def plot_quiver_2d_for_save(x0_c, x1_c, x0_q, x1_q, img=None, shape=None, origin
     # xq, yq -> array of components of quiver (Head of artow relative to tail)
     # real -> plot quiver with real xy dimension
 
-    fig = plt.figure(tight_layout=True, figsize=(15, 15))
+    fig = plt.figure(tight_layout=True)
 
     dpi = fig.get_dpi()
     # plt.subplots_adjust(left=0.0, right=1.0, bottom=0.0, top=1.0)
@@ -101,7 +99,7 @@ def plot_quiver_2d_for_save(x0_c, x1_c, x0_q, x1_q, img=None, shape=None, origin
     if img is not None:
         plt.imshow(img, origin=origin, cmap=cmap_image, alpha=0.9)
         if shape is None:
-            shape = img.shape  # shape del frame tiff da plottare sotto i quiver
+            shape = img.shape
     else:
         color = 'k'  # background uniforme
 
@@ -119,12 +117,12 @@ def plot_quiver_2d_for_save(x0_c, x1_c, x0_q, x1_q, img=None, shape=None, origin
                           units='xy', headwidth=1, headlength=0, width=width,
                           scale_units=scale_units, scale=scale, pivot=pivot)
 
-    if shape is not None:
-        # plt.xlim((0, shape[1]))
-        # plt.ylim((0, shape[0]))  # remember Image standard system : x -> col, y -> row
-        fig.set_size_inches(shape[1] / dpi, shape[0] / dpi)
-        print('shape_inside: ', shape)
-        print('set_size_inches : ', shape[1] / dpi, shape[0] / dpi)
+    #     if shape is not None:
+    #         plt.xlim((0, shape[1]))
+    #         plt.ylim((0, shape[0]))  # remember Image standard system : x -> col, y -> row
+    #         fig.set_size_inches(shape[1]/dpi, shape[0]/dpi)
+    #         print('shape_inside: ', shape)
+    #         print('set_size_inches : ', shape[1]/dpi, shape[0]/dpi)
 
     # if color_map is not None:
     # plt.colorbar(quiv,cmap=color_map)
@@ -142,9 +140,8 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
                            _save_all_R_planes=True, _plot_img=True, _plot_on_MIP=False, _save_on_MIP=False,
                            manual_z_R_selection=None, color_to_use=COL_ZETA, param_for_color=None,
                            color_map=cm.plasma, cmap_used='plasma', _blur_color_par=False, _image_white=False,
-                           _equalize=False, clip=None,
-                           maxPixelValue=100, img_format=IMG_TIFF, ev_index=2, info_to_plot='none', scale=0.07,
-                           _show_plots=True, fa_threshold=0.0):
+                           img_format=IMG_TIFF, ev_index=2, info_to_plot='none', scale=0.07, _show_plots=True):
+
     base_path = os.path.join(home_path, acquisition_folder)
     parameter_filepath = os.path.join(base_path, parameter_filename)
 
@@ -177,7 +174,7 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
     print('Pixel size (Real) in Z : {} um'.format(res_z))
 
     # dimension of analysis block (parallelogram)
-    row_P = col_P = int(parameters['roi_xy_pix'])
+    block_side = row_P = col_P = int(parameters['roi_xy_pix'])
     shape_P = np.array((row_P, col_P, num_of_slices_P)).astype(np.int32)
     print('Dimension of Parallelepiped : {} pixel'.format(shape_P))
     print('Dimension of Parallelepiped : {} um'.format(np.array(shape_P) * np.array([res_xy, res_xy, res_z])))
@@ -299,7 +296,7 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
     for z_R in z_R_to_plot:
 
         if not _plot_on_MIP:
-            print('\n----- selected slice in R :      {} on {} - '.format(z_R, shape_R[2]), end='')
+            print(' - selected slice in R :      {} on {} - '.format(z_R, shape_R[2]), end='')
 
         # extract position coordinate of every block
         init_coord = Rf_z[z_R]['init_coord']  # rcz=yxz
@@ -393,13 +390,11 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
                         z_vol = shape_V[2] - 1
 
                     # extract frame
-                    img_z = normalize(volume[:, :, z_vol], dtype=np.uint8, max_value=maxPixelValue)
-                    print('    selected slice in Volume : {} on {}'.format(z_vol, shape_V[2]))
+                    img_z = normalize(volume[:, :, z_vol], dtype=np.uint8, max_value=100)
+                    print('     selected slice in Volume : {} on {} \n'.format(z_vol, shape_V[2]))
 
-                    if _equalize :
-                        # CLAHE on the current frame
-                        img_z = skimage_clahe(img_z, kernel_size=501, clip_limit=clip, nbins=256)
-
+                    # if _equalize :
+                    # TODO
                 else:
                     img_z = None  # raise error
 
@@ -409,8 +404,7 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
 
                 # prepare plot for save and/or plot image
                 fig, frame_plot = plot_quiver_2d_for_save(xc_z, yc_z, -xq_z, yq_z, color_values=color_values, img=img_z,
-                                                          title='R:{0} - Z:{1} - ev: {2}th'.format(z_R, z_vol,
-                                                                                                   ev_index),
+                                                          title='R:{0} - Z:{1} - ev: {2}th'.format(z_R, z_vol, ev_index),
                                                           scale_units='xy', scale=scale, pivot='middle',
                                                           real=False, width=3,
                                                           color_map=color_map, cmap_image=cmap_image,
@@ -457,23 +451,13 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
 
                 # saving images?
                 if _save_all_frames or _save_manual_fig or _save_all_R_planes:
-                    quiver_path = os.path.join(base_path, 'quiver_{}_{}_{}_{}'.
+                    quiver_path = os.path.join(base_path, 'quiver_{}_{}_{}_{}/'.
                                                format(info_to_plot, img_format,
                                                       R_filename.split('.')[0],
                                                       cmap_used))  # create path where save images
-
-                    # create subfolder with parameters values
-                    if _equalize:
-                        subfolder_name = 'scale{0:0.3f}_clahed{1:0.2f}'.format(scale, clip)
-                    else:
-                        subfolder_name = 'scale{0:0.3f}'.format(scale)
-
-                    quiver_path = os.path.join(quiver_path, subfolder_name)
-                    quiver_path = quiver_path + '/'
-
                     # check if it exist
                     if not os.path.isdir(quiver_path):
-                        os.makedirs(quiver_path)
+                        os.mkdir(quiver_path)
 
                     # create img name
                     img_name = str(z_vol) + 'ew{}'.format(ev_index)
@@ -498,6 +482,7 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
                         png2.save((str(quiver_path + img_name + '.tiff')))
                         png1.close()
 
+
                     if not _show_plots:
                         frame_plot.close(fig)
 
@@ -505,142 +490,116 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
     return quiver_path
 
 
-def main(args):
-    # extract parameters=======================================================
+# ================================================================================================================
+# =============================== PLOT PARAMETERS ================================================================
+# ================================================================================================================
 
-    # hardcoded properties=======================================================
-    # savings - choice only ONE mode!
-    _save_all_frames = False  # save every frame of tiff file with the corrispondent R depth vectors (VERY time expensive)
-    _save_manual_fig = False  # save only manual selected depth in 'img_format' format selected (time expensive)
-    _save_all_R_planes = True  # save one images for every R planes
+# savings - choice only ONE mode!
+_save_all_frames   = False  # save every frame of tiff file with the corrispondent R depth vectors (VERY time expensive)
+_save_manual_fig   = False  # save only manual selected depth in 'img_format' format selected (time expensive)
+_save_all_R_planes = True  # save one images for every R planes
 
-    _plot_img = True  # plot the tiff frames under the vectors
-    _plot_on_MIP = False
-    _save_on_MIP = False
-    _show_plots = False  # display the plots on the screen
+_plot_img    = True  # plot the tiff frames under the vectors
+_plot_on_MIP = False
+_save_on_MIP = False
+_show_plots  = False  # display the plots on the screen
 
-    # used only if save_manual_fig is True
-    # manual_z_R_selection = range(1, 65, 3)
-    manual_z_R_selection = [0, 1, 2, 3, 4]
+# used only if save_manual_fig is True
+# manual_z_R_selection = range(1, 65, 3)
+manual_z_R_selection = [0, 1, 2, 3, 4]
 
-    # threshold on fractional anisotropy
-    fa_threshold = args.fa # threshold on fractional anisotropy
+# choice what plot and what color_map
+color_to_use = COL_ZETA  # COL_XYANGLE, COL_PARAM, COL_ZETA
+param_for_color = Param.FA  # choice from class Param -> [used only if color_to_use = COL_PARAM]
+color_map, cmap_used = cm.plasma, 'plasma'
+_blur_color_par = False  # gaussian blur on the color matrix
 
-    # choice what plot and what color_map
-    color_to_use = COL_ZETA  # COL_XYANGLE, COL_PARAM, COL_ZETA
-    param_for_color = Param.FA  # choice from class Param -> [used only if color_to_use = COL_PARAM]
-    color_map, cmap_used = cm.plasma, 'plasma'
-    _blur_color_par = False  # gaussian blur on the color matrix
+# black or whit# equalize image - TODO
+# _equalize = True
 
-    # normalization of each frame
-    maxPixelValue = args.maxPixelValue
+# image background
+_image_white = False  # True: LDG gray_R; False: LDS gray (normal)
 
-    # image background
-    _image_white = False  # True: LDG gray_R; False: LDS gray (normal)
+# equalize image - TODO
+# _equalize = True
 
-    # equalize image
-    _equalize = args.equalize
-    clip = args.clip
+# image format to save (is 'save_fig' is selected):
+img_format = IMG_TIFF
 
-    # image format to save (is 'save_fig' is selected):
-    img_format = IMG_TIFF
+# Select index of eigenvector to plot (0: max, 2:min)
+ev_index = 2
 
-    # Select index of eigenvector to plot (0: max, 2:min)
-    ev_index = 2
+# quivers info to plot over images
+info_to_plot = 'none'  # option: 'ids', 'cell_ratio','cilindrical_dim','planar_dim',
+#                                'strenght', 'none', 'local_disarray', 'ew', 'fa', 'ev', 'evZerr',
+#                                'sum_shapes', 'ErrSumShapes'
+# NB: 'evZ' è la componente Z dell'autovettore orientazione
+# NB: evZerr p una misura di "scostamento" dal vettore unitario:
+# evZerr = 100 * (1 - evZ) -> così se evZ è 0.980, mi plotta 2.0, se 0.873, mi plotta 12.7
+# serve per vedere se vettore orientazione è troppo parallelo all'asse ottico <=> misura troppo sfuocata sul piano XY causa imaging
+# NB: sum_shapes = fa + cilindrical_dim + planar_dim
+# NB: ErrSumShapes = 10 * (1 - np.abs(sum_shapes))
 
-    # quivers info to plot over images
-    info_to_plot = 'none'  # option: 'ids', 'cell_ratio','cilindrical_dim','planar_dim',
-    #                                'strenght', 'none', 'local_disarray', 'ew', 'fa', 'ev', 'evZerr',
-    #                                'sum_shapes', 'ErrSumShapes'
-    # NB: 'evZ' è la componente Z dell'autovettore orientazione
-    # NB: evZerr p una misura di "scostamento" dal vettore unitario:
-    # evZerr = 100 * (1 - evZ) -> così se evZ è 0.980, mi plotta 2.0, se 0.873, mi plotta 12.7
-    # serve per vedere se vettore orientazione è troppo parallelo all'asse ottico <=> misura troppo sfuocata sul piano XY causa imaging
-    # NB: sum_shapes = fa + cilindrical_dim + planar_dim
-    # NB: ErrSumShapes = 10 * (1 - np.abs(sum_shapes))
+# scale of quiver lenght
+# scale = 0.05 # val più piccolo, quiver + lunghi
+scale = 0.07  # val più piccolo, quiver + lunghi
 
-    # scale of quiver lenght
-    # val più piccolo, quiver + lunghi
-    # scale = 0.025 # ok per mosaico intero a full resolution
-    # scale = 0.050 # ok per mosaico cropped a ds2
-    scale = args.scale
-    # ================================================================================================================
-    # =============================== END PARAMETERS =================================================================
-    # ================================================================================================================
+# ================================================================================================================
+# =============================== END PARAMETERS =================================================================
+# ================================================================================================================
 
-    # ------------------------------------------------------- [  A  ]----------------------------------------------------------------
-    # ################################################  COMMENT OR DECOMMENT ##########################################################
-    # ########################################  USE THAT AS INPUT FOR ONLY ONE SAMPLE ################################################
+# ------------------------------------------------------- [  A  ]----------------------------------------------------------------
+# ################################################  COMMENT OR DECOMMENT ##########################################################
+# ########################################  USE THAT AS INPUT FOR ONLY ONE SAMPLE ################################################
 
-    # home_path = r'/home/francesco/LENS/Whole_Heart/mesoSPIM_AC/taskForce/Disarray/Samples/analyzed/data/CTRL'
-    # home_path = r'/mnt/cuoricino/MesoScale/Camilla/PIG/Cosimo/remote_NL5836/remote_NL5836_CH0_WGA_cells/remote_NL5836_CH0_WGA_cells_WARPED/'
-    # acquisition_folder = r'test_analysis_parameters_on_cropped'
-    # stack_name = r'Rem_NL5836_CH0_wrpd_ds2xy_crop.tif'
-    # parameter_filename = 'parameters_cells_PIG_ds2.txt'
+# home_path = r'/home/francesco/LENS/Whole_Heart/mesoSPIM_AC/taskForce/Disarray/Samples/analyzed/data/CTRL'
+home_path = r'/home/francesco/LENS/Whole_Heart/mesoSPIM_AC/taskForce/Disarray/Samples/analyzed_th80%/data/PATHOL'
+acquisition_folder = r'7_months/N08'
+stack_name = r'N08.tif'
+parameter_filename = 'parameters_TaskForce.txt'
 
-    basepath, stack_name = os.path.split(args.source_path)
-    home_path, acquisition_folder = os.path.split(basepath)
-    parameter_filename = args.parameter_filename
-
-    plot_vectors_on_frames(home_path=home_path, acquisition_folder=acquisition_folder, stack_name=stack_name,
-                           parameter_filename=parameter_filename, _save_all_frames=_save_all_frames,
-                           _save_manual_fig=_save_manual_fig,
-                           _save_all_R_planes=_save_all_R_planes, _plot_img=_plot_img, _plot_on_MIP=_plot_on_MIP,
-                           _save_on_MIP=_save_on_MIP,
-                           manual_z_R_selection=manual_z_R_selection, color_to_use=color_to_use,
-                           param_for_color=param_for_color,
-                           color_map=color_map, cmap_used=cmap_used, _blur_color_par=_blur_color_par,
-                           _image_white=_image_white, _equalize=_equalize,
-                           clip=clip, maxPixelValue=maxPixelValue, img_format=img_format, ev_index=ev_index,
-                           info_to_plot=info_to_plot, scale=scale, _show_plots=_show_plots, fa_threshold=fa_threshold)
-    # #################################################################################################################################
-
-    # ------------------------------------------------------- [  B  ]----------------------------------------------------------------
-    ################################################  COMMENT OR DECOMMENT ##########################################################
-    ########################################  USE THAT AS INPUT FOR LIST OF SAMPLES  ################################################
-    #
-    # home_path = r'/home/francesco/LENS/Whole_Heart/mesoSPIM_AC/taskForce/Disarray/Samples/analyzed/data/{}'  # format(group)
-    # groups = ['CTRL', 'PATHOL']
-    # parameter_filename = 'parameters_TaskForce.txt'
-    #
-    # # start the plot_on_frames function for all samples of all groups
-    # for group in groups:
-    #     grouppath = home_path.format(group)
-    #
-    #     # list samples there
-    #     samplesnames = os.listdir(grouppath)
-    #     print('Start to prepare plots for the following samples:', samplesnames)
-    #
-    #     for sname in samplesnames:
-    #         acquisition_folder = r'{}'.format(sname)
-    #         stack_name = r'{}.tif'.format(sname)
-    #
-    #         print(acquisition_folder)
-    #         print(stack_name)
-    #
-    #         print(Bcolors.OKBLUE + 'Starting to plot vectors on frames for sample: {}'.format(sname) + Bcolors.ENDC)
-    #
-    #         try:
-    #             plot_vectors_on_frames(home_path=grouppath, acquisition_folder=acquisition_folder, stack_name=stack_name,
-    #                                    parameter_filename=parameter_filename, save_all_frames=save_all_frames, save_manual_fig=save_manual_fig,
-    #                                    save_all_R_planes=save_all_R_planes, plot_img=plot_img, plot_on_MIP=plot_on_MIP, save_on_MIP=save_on_MIP,
-    #                                    manual_z_R_selection=manual_z_R_selection, color_to_use=color_to_use, param_for_color=param_for_color,
-    #                                    color_map=color_map, cmap_used=cmap_used, _blur_color_par=_blur_color_par, image_white=image_white,
-    #                                    img_format=img_format, ev_index=ev_index, info_to_plot=info_to_plot, scale=scale, _show_plots=_show_plots)
-    #         except:
-    #             print(Bcolors.WARNING + 'something is wrong - plots not created. Skip to the next samples.' + Bcolors.ENDC)
-    # #################################################################################################################################
+plot_vectors_on_frames(home_path=home_path, acquisition_folder=acquisition_folder, stack_name=stack_name,
+                       parameter_filename=parameter_filename, _save_all_frames=_save_all_frames, _save_manual_fig=_save_manual_fig,
+                       _save_all_R_planes=_save_all_R_planes, _plot_img=_plot_img, _plot_on_MIP=_plot_on_MIP, _save_on_MIP=_save_on_MIP,
+                       manual_z_R_selection=manual_z_R_selection, color_to_use=color_to_use, param_for_color=param_for_color,
+                       color_map=color_map, cmap_used=cmap_used, _blur_color_par=_blur_color_par, _image_white=_image_white,
+                       img_format=img_format, ev_index=ev_index, info_to_plot=info_to_plot, scale=scale, _show_plots=_show_plots)
+# #################################################################################################################################
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Plot vectors on frames.')
-    parser.add_argument('-s', '--source_path', type=str, required=True, help='Complete Path of input tiff.')
-    parser.add_argument('-p', '--parameter_filename', type=str, required=True, help='Parameter filename.')
-    parser.add_argument('-f', '--fa', type=float, default=0.0, help='Threshold on Fractional Anisotropy to plot quivers. If not passed, no threshold is applied.')
-    parser.add_argument('--equalize', action='store_true', default=False, help='Equalize the image.')
-    parser.add_argument('--clip', type=float, default=0.03, help='Clip limit for equalization.')
-    parser.add_argument('--maxPixelValue', type=int, default=150, help='Maximum pixel value for normalization.')
-    parser.add_argument('--ev_index', type=int, default=2, help='Index of eigenvector to plot.')
-    parser.add_argument('--scale', type=float, default=0.07, help='Scale of quiver length.')
-    args = parser.parse_args()
-    main(args)
+
+# ------------------------------------------------------- [  B  ]----------------------------------------------------------------
+################################################  COMMENT OR DECOMMENT ##########################################################
+########################################  USE THAT AS INPUT FOR LIST OF SAMPLES  ################################################
+#
+# home_path = r'/home/francesco/LENS/Whole_Heart/mesoSPIM_AC/taskForce/Disarray/Samples/analyzed/data/{}'  # format(group)
+# groups = ['CTRL', 'PATHOL']
+# parameter_filename = 'parameters_TaskForce.txt'
+#
+# # start the plot_on_frames function for all samples of all groups
+# for group in groups:
+#     grouppath = home_path.format(group)
+#
+#     # list samples there
+#     samplesnames = os.listdir(grouppath)
+#     print('Start to prepare plots for the following samples:', samplesnames)
+#
+#     for sname in samplesnames:
+#         acquisition_folder = r'{}'.format(sname)
+#         stack_name = r'{}.tif'.format(sname)
+#
+#         print(acquisition_folder)
+#         print(stack_name)
+#
+#         print(Bcolors.OKBLUE + 'Starting to plot vectors on frames for sample: {}'.format(sname) + Bcolors.ENDC)
+#
+#         try:
+#             plot_vectors_on_frames(home_path=grouppath, acquisition_folder=acquisition_folder, stack_name=stack_name,
+#                                    parameter_filename=parameter_filename, save_all_frames=save_all_frames, save_manual_fig=save_manual_fig,
+#                                    save_all_R_planes=save_all_R_planes, plot_img=plot_img, plot_on_MIP=plot_on_MIP, save_on_MIP=save_on_MIP,
+#                                    manual_z_R_selection=manual_z_R_selection, color_to_use=color_to_use, param_for_color=param_for_color,
+#                                    color_map=color_map, cmap_used=cmap_used, _blur_color_par=_blur_color_par, image_white=image_white,
+#                                    img_format=img_format, ev_index=ev_index, info_to_plot=info_to_plot, scale=scale, _show_plots=_show_plots)
+#         except:
+#             print(Bcolors.WARNING + 'something is wrong - plots not created. Skip to the next samples.' + Bcolors.ENDC)
+# #################################################################################################################################

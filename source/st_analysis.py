@@ -53,7 +53,7 @@ from disarray_tools import estimate_local_disarray, save_in_numpy_file, compile_
     sigma_for_uniform_resolution, downsample_2_zeta_resolution, CONST
 
 
-def block_analysis(parall, shape_P, parameters, sigma, _verbose):
+def block_analysis(parall, shape_P, parameters, sigma, _verbose, fa_threshold, z_comp_threshold):
     # parall : np.uint8
 
     # initialize empty dictionary and
@@ -61,9 +61,15 @@ def block_analysis(parall, shape_P, parameters, sigma, _verbose):
     there_is_cell = False
     there_is_info = False
 
+    # average intensity of the block
+    mean_intensity = np.mean(parall)
+    results['mean_intensity'] = mean_intensity
+    if _verbose:
+        print('   mean_intensity :   ', mean_intensity)
+
     # check if this block contains cell with the selected methods:
     if parameters['mode_ratio'] == Cell_Ratio_mode.MEAN:
-        cell_ratio = np.mean(parall)
+        cell_ratio = np.copy(mean_intensity)
     elif parameters['mode_ratio'] == Cell_Ratio_mode.NON_ZERO_RATIO:
         cell_ratio = np.count_nonzero(parall) / np.prod(shape_P)
     else:
@@ -98,8 +104,8 @@ def block_analysis(parall, shape_P, parameters, sigma, _verbose):
 
         # TODO CONTROLLO SUI PARAMETRI  DI FORMA - mettere come parametri - adesso HARDCODED
         ev2z = v[2, 2]  # comp. Z del 3th autovettore (comp Z autovett orientaz)
-        # se np.abs(ev2z) > 0.975 uvol dire che vettore parallelo asse z (img troppo sfuocata sul pinao xy causa imaging)
-        if shape_parameters['fa'] >= 0.25 and np.abs(ev2z) < 0.975 and shape_parameters['sum_shapes'] > 0.7:
+        # se np.abs(ev2z) > 0.975 uvol dire che vettore perfettamente parallelo asse z (img troppo sfuocata sul pinao xy causa imaging)
+        if shape_parameters['fa'] >= fa_threshold and np.abs(ev2z) < z_comp_threshold:
             there_is_info = True
 
             # save ordered eigenvectors
@@ -119,7 +125,7 @@ def block_analysis(parall, shape_P, parameters, sigma, _verbose):
     return there_is_cell, there_is_info, results
 
 
-def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbose=False):
+def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbose=False, fa_threshold=0.30, z_comp_threshold=0.975):
     # virtually dissect 'volume', perform on each block the analysis implemented in 'block_analysis',
     # and save the results inside R
 
@@ -129,9 +135,9 @@ def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbo
                                               px_size_xy=parameters['px_size_xy'])
 
     perc = 0
-    count = 0  # count iteration
-    tot = np.prod(shape_R)
-    print(' > Expected iterations : ', tot)
+    count_iterations = 0  # count iteration
+    expected_iterations = np.prod(shape_R)
+    print(' > Expected iterations : ', expected_iterations)
 
     for z in range(shape_R[2]):
         if _verbose:
@@ -143,12 +149,12 @@ def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbo
                 start_coord = create_coord_by_iter(r, c, z, shape_P)
                 slice_coord = create_slice_coordinate(start_coord, shape_P)
 
-                perc = 100 * (count / tot)
+                perc = 100 * (count_iterations / expected_iterations)
                 if _verbose:
                     print('\n')
 
                 # save init info in R
-                R[r, c, z]['id_block'] = count
+                R[r, c, z]['id_block'] = count_iterations
                 R[r, c, z][Param.INIT_COORD] = start_coord
 
                 # extract parallelepiped
@@ -166,7 +172,9 @@ def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbo
                         shape_P,
                         parameters,
                         sigma_blur,
-                        _verbose)
+                        _verbose,
+                        fa_threshold,
+                        z_comp_threshold)
 
                     # save info in R[r, c, z]
                     if there_is_cell: R[r, c, z]['cell_info'] = True
@@ -184,8 +192,8 @@ def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbo
                     if _verbose:
                         print('   block rejected   ')
 
-                count += 1
-    return R, count
+                count_iterations += 1
+    return R, count_iterations
 
 
 # =================================================== MAIN () ================================================
@@ -205,11 +213,15 @@ def main(parser):
 
 
     ## Extract input information FROM TERMINAL =========
-    args = parser.parse_args()
-    source_path = manage_path_argument(args.source_path)
+    args               = parser.parse_args()
+    source_path        = manage_path_argument(args.source_path)
     parameter_filename = args.parameters_filename[0]
-    _verbose = args.verbose
-    _deep_verbose = args.deep_verbose
+    _verbose           = args.verbose
+    _deep_verbose      = args.deep_verbose
+    _plot_quiver       = args.plot_quiver
+    fa_threshold       = args.fa_threshold  # not used in this script
+    z_comp_threshold   = args.z_comp_threshold  # not used in this script
+
     if _verbose:
         print(Bcolors.FAIL + ' *** VERBOSE MODE *** ' + Bcolors.ENDC)
     if _deep_verbose:
@@ -223,7 +235,7 @@ def main(parser):
     parameter_filepath = os.path.join(base_path, process_folder, parameter_filename)
     stack_prefix = stack_name.split('.')[0]
 
-    # create introductiveme informations
+    # create introductiveme information
     mess_strings = list()
     mess_strings.append(Bcolors.OKBLUE + '\n\n*** ST orientation Analysis ***\n' + Bcolors.ENDC)
     mess_strings.append(' > source path: {}'.format(source_path))
@@ -236,6 +248,8 @@ def main(parser):
     mess_strings.append(' > PREFERENCES:')
     mess_strings.append('  - _verbose {}'.format(_verbose))
     mess_strings.append('  - _deep_verbose {}'.format(_deep_verbose))
+    mess_strings.append('  - _plot_quiver {}'.format(_plot_quiver))
+    mess_strings.append('  - fa_threshold {}'.format(fa_threshold))
 
     # extract parameters
     param_names = ['roi_xy_pix',
@@ -272,6 +286,15 @@ def main(parser):
         shape_P[0] * parameters['px_size_xy'],
         shape_P[1] * parameters['px_size_xy'],
         shape_P[2] * parameters['px_size_z']))
+
+    # check modality of check of cell content
+    mess_strings.append('\n *** Check modality of signal in blocks')
+    if parameters['mode_ratio'] == Cell_Ratio_mode.MEAN:
+        mess_strings.append(' > Selected mode_ratio = MEAN > {}'.format(parameters['threshold_on_cell_ratio']))
+    elif parameters['mode_ratio'] == Cell_Ratio_mode.NON_ZERO_RATIO:
+        mess_strings.append(' > Selected mode_ratio = NON_ZERO_RATIO > {}'.format(parameters['threshold_on_cell_ratio']))
+    else:
+        mess_strings.append(' > ** WARNING: parameters[\'mode_ratio\'] is not recognized: all blacks are not analyzed')
 
     # create result.txt filename:
     txt_info_filename = 'Orientations_INFO_' + stack_prefix + '_' \
@@ -322,7 +345,7 @@ def main(parser):
     R, shape_R = create_R(shape_V, shape_P)
 
     # real analysis on R
-    R, count = iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbose)
+    R, count = iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbose, fa_threshold, z_comp_threshold)
     mess_strings.append('\n > Orientation analysis completed.')
 
     # extract informations about the data analyzed
@@ -378,6 +401,13 @@ def main(parser):
     # clear list of strings
     mess_strings.clear()
 
+    # 4 ----------------------------------------------------------------------------------------------------
+    # Call the plot_quiver_on_mosaic_frame script
+    if _plot_quiver:
+        print(Bcolors.OKBLUE + '*** Run plot_quiver_on_frames... ' + Bcolors.ENDC)
+        # build the command to run the script
+        plot_vectors_script_path = os.path.join(os.path.dirname(__file__), 'plot_vectors_on_frames.py')
+        os.system(f'python3 {plot_vectors_script_path} -s {source_path} -p {parameter_filename}')
 # =============================================== END MAIN () ================================================
 
 
@@ -394,6 +424,14 @@ if __name__ == '__main__':
                            help='print additional informations')
     my_parser.add_argument('-d', action='store_true', default=False, dest='deep_verbose',
                            help='print a lot of informations - DEBUG MODE')
+    my_parser.add_argument('-q', '--plot-quiver', action='store_true', default=False, dest='plot_quiver',
+                           help='run "plot_quiver_on_mosaic_frame" at the end of the script')
+    # add fractional anisotropy threshold
+    my_parser.add_argument('-f', '--fa-threshold', type=float, default=0.30, dest='fa_threshold',
+                           help='fractional anisotropy threshold for valid direction (default: 0.30)')
+    # add threshold on the z component of vectors
+    my_parser.add_argument('-z', '--z-comp-threshold', type=float, default=0.975, dest='z_comp_threshold',
+                           help='threshold on the z component of vectors (default: 0.975)')
 
     main(my_parser)
     # ============================================== START  BY TERMINAL ======================================

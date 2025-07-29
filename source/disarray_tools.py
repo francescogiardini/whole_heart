@@ -44,6 +44,7 @@ class Param:
     SUM_SHAPES = 'sum_shapes'  # def as: (fa + planar_dim + cilindrical_dim)
     LOCAL_DISARRAY = 'local_disarray'   # local_disarray
     LOCAL_DISARRAY_W = 'local_disarray_w'  # local_disarray using FA as weight for the versors
+    MEAN_INTENSITY = 'mean_intensity'  # mean intensity of the block
 
 
 class Stat:
@@ -198,19 +199,32 @@ def structure_tensor_analysis_3d(vol, _rotation=False):
     shape_parameters = dict()
 
     # calcolo fractional anisotropy (0 isotropy -> 1 anisotropy)
-    shape_parameters['fa'] = np.sqrt(1/2) * (
-        np.sqrt((w[0] - w[1]) ** 2 + (w[1] - w[2]) ** 2 + (w[2] - w[0]) ** 2) / np.sqrt(np.sum(w ** 2))
-    )
+    denominator = np.sqrt(np.sum(w ** 2))
+    if denominator == 0:
+        # if denominator is 0, all eigenvalues are 0, so the FA is 0
+        shape_parameters['fa'] = 0.0
+    else:
+        shape_parameters['fa'] = np.sqrt(1/2) * (
+            np.sqrt((w[0] - w[1]) ** 2 + (w[1] - w[2]) ** 2 + (w[2] - w[0]) ** 2) / denominator
+        )
 
     # calcolo parametro forza del gradiente (per distinguere contenuto da sfondo)
     # (w1 .=. w2 .=. w3)
     shape_parameters['strenght'] = np.sqrt(np.sum(w))
 
     # calcolo dimensionalità forma cilindrica (w1 .=. w2 >> w3)
-    shape_parameters['cilindrical_dim'] = (w[1] - w[2]) / (w[1] + w[2])
+    denominator = (w[1] + w[2])
+    if denominator == 0:
+        shape_parameters['cilindrical_dim'] = 0.0
+    else:
+        shape_parameters['cilindrical_dim'] = (w[1] - w[2]) / denominator
 
     # calcolo dimensionalità forma planare (w1 >> w2 .=. w3)
-    shape_parameters['planar_dim'] = (w[0] - w[1]) / (w[0] + w[1])
+    denominator = (w[0] + w[1])
+    if denominator == 0:
+        shape_parameters['planar_dim'] = 0.0
+    else:
+        shape_parameters['planar_dim'] = (w[0] - w[1]) / denominator
 
     # parametro def da me che soma i fattori di forma
     shape_parameters['sum_shapes'] = shape_parameters['planar_dim'] + shape_parameters['cilindrical_dim'] + shape_parameters['fa']
@@ -245,7 +259,8 @@ def create_R(shape_V, shape_P):
                    (Param.STRENGHT, np.float16),  # parametro forza del gradiente (w1 .=. w2 .=. w3)
                    (Param.CILINDRICAL_DIM, np.float16),  # dimensionalità forma cilindrica (w1 .=. w2 >> w3)
                    (Param.PLANAR_DIM, np.float16),  # dimensionalità forma planare (w1 >> w2 .=. w3)
-                   (Param.FA, np.float16),  # fractional anisotropy (0-> isotropic, 1-> max anisotropy
+                   (Param.FA, np.float16),  # fractional anisotropy (0-> isotropic, 1-> max anisotropy)
+                   (Param.MEAN_INTENSITY, np.float16),  # mean intensity of the block
                    (Param.SUM_SHAPES, np.float16),  # fa + planar_dim + cilindrical_dim
                    (Param.LOCAL_DISARRAY, np.float16),  # local_disarray
                    (Param.LOCAL_DISARRAY_W, np.float16)  # local_disarray using FA as weight for the versors

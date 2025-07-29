@@ -998,7 +998,7 @@ def main(parser):
     left_cam_path = manage_path_argument(args.leftCAM_path)
     right_cam_path = manage_path_argument(args.rightCAM_path)
     parameter_filepath = args.parameters_filepath[0]
-    sample_name = args.sample_name
+    sample_name = args.sample_name[0]
     base_dirpath = os.path.dirname(left_cam_path)
     output_folderpath = args.output_folderpath[0] if args.output_folderpath else base_dirpath
     z_fusion = args.z_fusion[0] if args.z_fusion else None
@@ -1241,7 +1241,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--parameters-filepath',
                         nargs='+', required=True,
                         help='filepath of parameters.txt file')
-    parser.add_argument('-sm', '--sample_name',
+    parser.add_argument('-sn', '--sample_name',
                         type=str, nargs=1, required=False, default='sample',
                         help='Name of the sample. Default: "sample". ')
     # add output folder if needed
