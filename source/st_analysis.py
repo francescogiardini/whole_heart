@@ -102,19 +102,19 @@ def block_analysis(parall, shape_P, parameters, sigma, _verbose, fa_threshold, z
         # - shape_parameters : dictionary of shape parameters
         w, v, shape_parameters = structure_tensor_analysis_3d(parall_down, _rotation=False)
 
-        # TODO CONTROLLO SUI PARAMETRI  DI FORMA - mettere come parametri - adesso HARDCODED
+        # save ordered eigenvectors
+        results['ev'] = v
+        results['ew'] = w
+
+        # save shape parameters
+        for key in shape_parameters.keys():
+            results[key] = shape_parameters[key]
+
+        # check if there is the orientation information in the block
         ev2z = v[2, 2]  # comp. Z del 3th autovettore (comp Z autovett orientaz)
-        # se np.abs(ev2z) > 0.975 uvol dire che vettore perfettamente parallelo asse z (img troppo sfuocata sul pinao xy causa imaging)
+        # se np.abs(ev2z) > 0.975 vuol dire che vettore perfettamente parallelo asse z (img troppo sfuocata sul pinao xy causa imaging)
         if shape_parameters['fa'] >= fa_threshold and np.abs(ev2z) < z_comp_threshold:
             there_is_info = True
-
-            # save ordered eigenvectors
-            results['ev'] = v
-            results['ew'] = w
-
-            # save shape parameters
-            for key in shape_parameters.keys():
-                results[key] = shape_parameters[key]
         else:
             if _verbose:
                 print('Block rejected ( no info in freq )')
@@ -385,7 +385,8 @@ def main(parser):
     # SAVE R in a NUMPY FILES, write info in the 'Orientation_info.txt'
 
     # create result matrix (R) filename:
-    R_filename = 'R_' + stack_prefix + '_' + str(int(parameters['roi_xy_pix'] * parameters['px_size_xy'])) + 'um.npy'
+    prefix = 'R_' + stack_prefix + '_fa{0:0.2f}'.format(fa_threshold)
+    R_filename = prefix + '_' + str(int(parameters['roi_xy_pix'] * parameters['px_size_xy'])) + 'um.npy'
     R_filepath = os.path.join(base_path, process_folder, R_filename)
 
     # Save Results in R.npy

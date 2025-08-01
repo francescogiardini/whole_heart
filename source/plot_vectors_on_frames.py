@@ -144,7 +144,7 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
                            color_map=cm.plasma, cmap_used='plasma', _blur_color_par=False, _image_white=False,
                            _equalize=False, clip=None,
                            maxPixelValue=100, img_format=IMG_TIFF, ev_index=2, info_to_plot='none', scale=0.07,
-                           _show_plots=True, fa_threshold=0.0):
+                           _show_plots=True, fa_threshold=None):
     base_path = os.path.join(home_path, acquisition_folder)
     parameter_filepath = os.path.join(base_path, parameter_filename)
 
@@ -244,13 +244,15 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
 
     # ==== BLOCKS EXTRACTION FROM R AT EVERY Z PLANES =====
 
-    # for each z in R, extract only cubes with freq info and their 'param_to_plot' values, and put in two list
+    # for each z in R, extract only cubes with orient info and their 'param_to_plot' values, and put in two list
 
     # extract bool maps of valid blocks
-    orient_info_bool = R[
-        'orient_info']  # TODO -> pensare a 'mappatura' di grane 'valide e non valide' tipo segmentazione
+    if fa_threshold is None: # use embedded orient_info in R
+        orient_info_bool = R['orient_info']  # R[allR, allrC, Z]["bool_map_of_blocks_with_orient_info"[allR, allC, Z]]
+    else: # use FA threshold to extract valid blocks
+        orient_info_bool = R['fa'] > fa_threshold  # R[allR, allrC, Z]["bool_map_of_blocks_where_fa > TH"[allR, allC, Z]]
 
-    # per ogni z di R, estraggo i cubi validi (utilizzando la mappa booleana orient_info_bool)
+    # per ogni z di R, estraggo i cubi validi (utilizzando la mappa booleana orient_info_bool appena generata)
     # e li inserisco in una lista (Rf_z) alla z corrispondente
     Rf_z = list()
     param_to_plot_2d_list = list()
@@ -258,9 +260,10 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
     print('\nCollecting valid orientation vectors for each plane:')
     for z in range(shape_R[2]):
 
-        # extract map of valid cells
-        print('z: {} -> valid_cells: {}'.format(z, R[:, :, z][orient_info_bool[:, :, z]].shape[0]))
-        Rf_z.append(R[:, :, z][orient_info_bool[:, :, z]])  # R[allR, allrC, Z][bool_map_of_valid_blocks[allR, allC, Z]]
+        valid_R_cells = R[:, :, z][orient_info_bool[:, :, z]]  # R[allR, allrC, Z][bool_map_of_valid_blocks[allR, allC, Z]]
+
+        print('z: {} -> valid_cells: {}'.format(z, valid_R_cells.shape[0]))
+        Rf_z.append(valid_R_cells)
 
         # extract param_to_plt
         if _blur_color_par:
@@ -288,7 +291,9 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
     # if not, that z is not inserted in the list 'z_R_to_plot'
     z_R_to_plot = list()
     for z_R in z_R_to_check:
-        valid_elem = R[:, :, z_R][orient_info_bool[:, :, z_R]].shape[0]
+
+        # valid_elem = R[:, :, z_R][orient_info_bool[:, :, z_R]].shape[0]     -> OLD: why extract again??? it is in Rf_z[z_R]
+        valid_elem = Rf_z[z_R].shape[0]  # number of valid elements in Rf_z[z_R]
         if valid_elem > 0:
             z_R_to_plot.append(z_R)
         else:
@@ -468,6 +473,9 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
                     else:
                         subfolder_name = 'scale{0:0.3f}'.format(scale)
 
+                    if fa_threshold is not None:
+                        subfolder_name = subfolder_name + '_fa{0:0.1f}'.format(fa_threshold)
+
                     quiver_path = os.path.join(quiver_path, subfolder_name)
                     quiver_path = quiver_path + '/'
 
@@ -636,7 +644,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Plot vectors on frames.')
     parser.add_argument('-s', '--source_path', type=str, required=True, help='Complete Path of input tiff.')
     parser.add_argument('-p', '--parameter_filename', type=str, required=True, help='Parameter filename.')
-    parser.add_argument('-f', '--fa', type=float, default=0.0, help='Threshold on Fractional Anisotropy to plot quivers. If not passed, no threshold is applied.')
+    parser.add_argument('-f', '--fa', type=float, default=None, help='Threshold on Fractional Anisotropy to plot quivers. If not passed, the "orient_info" in R is used.')
     parser.add_argument('--equalize', action='store_true', default=False, help='Equalize the image.')
     parser.add_argument('--clip', type=float, default=0.03, help='Clip limit for equalization.')
     parser.add_argument('--maxPixelValue', type=int, default=150, help='Maximum pixel value for normalization.')
