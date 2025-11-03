@@ -218,6 +218,6 @@ if __name__ == "__main__":
     print("Analisi dei campi FA e aggiornamento Excel")
     parser = argparse.ArgumentParser(description="Analisi FA e aggiornamento Excel")
     parser.add_argument("cartella", help="Path della cartella con i file .npy")
-    parser.add_argument("file_excel", help="Path del file Excel (.xlsx)")
+    parser.add_argument("file_excel", help="Path del file Excel di input(.xlsx)")
 
     main(parser)
