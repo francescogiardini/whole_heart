@@ -35,9 +35,10 @@ class Bcolors:
 
 def plot_dots_2d_for_save(xc, yc, img=None, shape=None, origin='upper',
                           cmap_image='gray', marker_size=30, marker_color='r',
+                          edge_color='black', edge_width=2,
                           _show_plot=False):
     """
-    Plot red dots at positions (xc, yc) over an image.
+    Plot dots at positions (xc, yc) over an image.
     xc, yc: arrays of x (horizontal axis) and y (vertical axis) coordinates of dot centers.
     """
     fig = plt.figure(tight_layout=True, figsize=(15, 15))
@@ -56,7 +57,8 @@ def plot_dots_2d_for_save(xc, yc, img=None, shape=None, origin='upper',
     fig.add_axes(ax)
 
     # plot all dots
-    plt.scatter(xc, yc, s=marker_size, c=marker_color, marker='o', edgecolors='none', alpha=0.8)
+    plt.scatter(xc, yc, s=marker_size, c=marker_color, marker='o',
+                edgecolors=edge_color, linewidths=edge_width, alpha=0.8)
 
     if shape is not None:
         fig.set_size_inches(shape[1] / dpi, shape[0] / dpi)
@@ -104,7 +106,7 @@ def make_output_dir(base_path, fa_threshold, stack_prefix, plane_name, _equalize
 def plot_rejected_on_frames(source_path, parameter_filename, R_filepath, fa_threshold,
                             _equalize=False, clip=0.03, maxPixelValue=150,
                             _show_plots=False, marker_size=30, _orthogonals=True,
-                            marker_color='r'):
+                            marker_color='r', edge_color='black', edge_width=2):
 
     base_path = os.path.dirname(source_path)
     stack_name = os.path.basename(source_path)
@@ -231,6 +233,8 @@ def plot_rejected_on_frames(source_path, parameter_filename, R_filepath, fa_thre
                                                  cmap_image=cmap_image,
                                                  marker_size=marker_size,
                                                  marker_color=marker_color,
+                                                 edge_color=edge_color,
+                                                 edge_width=edge_width,
                                                  _show_plot=_show_plots)
 
         # saving image as TIFF
@@ -307,6 +311,8 @@ def plot_rejected_on_frames(source_path, parameter_filename, R_filepath, fa_thre
                                                      cmap_image=cmap_image,
                                                      marker_size=marker_size,
                                                      marker_color=marker_color,
+                                                     edge_color=edge_color,
+                                                     edge_width=edge_width,
                                                      _show_plot=_show_plots)
 
             xz_output_path = make_output_dir(base_path, fa_threshold, stack_prefix, 'XZ', _equalize, clip)
@@ -374,6 +380,8 @@ def plot_rejected_on_frames(source_path, parameter_filename, R_filepath, fa_thre
                                                      cmap_image=cmap_image,
                                                      marker_size=marker_size,
                                                      marker_color=marker_color,
+                                                     edge_color=edge_color,
+                                                     edge_width=edge_width,
                                                      _show_plot=_show_plots)
 
             yz_output_path = make_output_dir(base_path, fa_threshold, stack_prefix, 'YZ', _equalize, clip)
@@ -397,8 +405,11 @@ def main(args):
         'green': (0.0, 1.0, 0.0),
         'blue':  (0.0, 0.0, 1.0),
         'cyan':  (0.0, 1.0, 1.0),
+        'black': (0.0, 0.0, 0.0),
+        'white': (1.0, 1.0, 1.0),
     }
     marker_color = COLOR_MAP[args.marker_color]
+    edge_color = COLOR_MAP[args.edge_color]
 
     plot_rejected_on_frames(
         source_path=args.source_path,
@@ -411,7 +422,9 @@ def main(args):
         _show_plots=False,
         marker_size=args.marker_size,
         _orthogonals=args.orthogonals,
-        marker_color=marker_color
+        marker_color=marker_color,
+        edge_color=edge_color,
+        edge_width=args.edge_width
     )
 
 
@@ -437,7 +450,12 @@ if __name__ == "__main__":
     parser.add_argument('--marker_size', type=int, default=40,
                         help='Size of the red dot markers.')
     parser.add_argument('--marker_color', type=str, default='red',
-                        choices=['red', 'green', 'blue', 'cyan'],
-                        help='Color of the dot markers (default: red). Choices: red, green, blue, cyan.')
+                        choices=['red', 'green', 'blue', 'cyan', 'black', 'white'],
+                        help='Fill color of the dot markers (default: red).')
+    parser.add_argument('--edge_color', type=str, default='black',
+                        choices=['red', 'green', 'blue', 'cyan', 'black', 'white'],
+                        help='Edge color of the dot markers (default: black).')
+    parser.add_argument('--edge_width', type=float, default=2.0,
+                        help='Edge width of the dot markers (default: 2.0).')
     args = parser.parse_args()
     main(args)
