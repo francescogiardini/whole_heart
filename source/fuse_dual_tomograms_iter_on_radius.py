@@ -2,7 +2,7 @@ import os
 import argparse
 import json
 
-from tifffile import imsave
+from tifffile import imwrite
 
 from matplotlib.pyplot import xlabel
 from scipy.fft import fft2, ifft2, fftshift

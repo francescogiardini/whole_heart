@@ -4,7 +4,7 @@ from PIL import Image
 from io import BytesIO
 import matplotlib.pyplot as plt
 # from skimage.external.tifffile import imsave
-from tifffile import imsave as imsave
+from tifffile import imwrite as imsave
 from tifffile import imread as imread
 
 import warnings
