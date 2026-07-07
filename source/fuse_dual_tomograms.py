@@ -9,6 +9,7 @@ from scipy.fft import fft2, fftshift
 from scipy.signal import fftconvolve
 from scipy.ndimage import shift, zoom
 from skimage.filters import threshold_otsu
+from skimage.registration import phase_cross_correlation
 from tifffile import imread, imwrite
 # from skimage.filters.tests.test_median import image
 import matplotlib.pyplot as plt
@@ -497,7 +498,8 @@ def plot_matches(img1, img2, kp1, kp2, matches, title='Matches'):
     plt.show()
 
 
-def estimate_isotropic_scaling_and_translation(img1, img2, _plot_matches=False, plot_inliers_only=True, _verb=False):
+def estimate_isotropic_scaling_and_translation(img1, img2, _plot_matches=False, plot_inliers_only=True,
+                                               _verb=False, refine_xcorr=True):
     # OpenCV 4.11+ requires uint8 single-channel — normalize explicitly
     def _to_uint8(img):
         img = img.astype(np.float32)
@@ -505,13 +507,13 @@ def estimate_isotropic_scaling_and_translation(img1, img2, _plot_matches=False, 
         if hi > lo:
             img = (img - lo) / (hi - lo) * 255.0
         return img.astype(np.uint8)
-    img1 = _to_uint8(img1)
-    img2 = _to_uint8(img2)
+    img1_u8 = _to_uint8(img1)
+    img2_u8 = _to_uint8(img2)
 
     # Rileva feature con ORB
     orb = cv2.ORB_create(1000)
-    kp1, des1 = orb.detectAndCompute(img1, None)
-    kp2, des2 = orb.detectAndCompute(img2, None)
+    kp1, des1 = orb.detectAndCompute(img1_u8, None)
+    kp2, des2 = orb.detectAndCompute(img2_u8, None)
 
     # Matcher con ratio test
     bf = cv2.BFMatcher(cv2.NORM_HAMMING)
@@ -536,9 +538,9 @@ def estimate_isotropic_scaling_and_translation(img1, img2, _plot_matches=False, 
     if _plot_matches:
         if plot_inliers_only and inliers is not None:
             inlier_matches = [m for i, m in enumerate(good_matches) if inliers[i]]
-            plot_matches(img1, img2, kp1, kp2, inlier_matches, title='Inlier Matches (RANSAC)')
+            plot_matches(img1_u8, img2_u8, kp1, kp2, inlier_matches, title='Inlier Matches (RANSAC)')
         else:
-            plot_matches(img1, img2, kp1, kp2, good_matches, title='Good Matches (ratio test)')
+            plot_matches(img1_u8, img2_u8, kp1, kp2, good_matches, title='Good Matches (ratio test)')
 
     # Calcola la scala isotropica
     scale_x = np.linalg.norm(M[0, :2])
@@ -548,6 +550,20 @@ def estimate_isotropic_scaling_and_translation(img1, img2, _plot_matches=False, 
     # Estrai traslazione
     tx = M[0, 2]
     ty = M[1, 2]
+
+    # --- Secondo step: affinamento con cross-correlazione sull'immagine intera ---
+    if refine_xcorr:
+        h, w = img1_u8.shape[:2]
+        M_orb = np.array([[scale, 0, tx], [0, scale, ty]], dtype=np.float32)
+        img2_aligned = cv2.warpAffine(img2_u8, M_orb, (w, h), flags=cv2.INTER_LINEAR)
+        shift_yx, _, _ = phase_cross_correlation(img1_u8.astype(np.float32),
+                                                 img2_aligned.astype(np.float32),
+                                                 upsample_factor=10)
+        dty, dtx = float(shift_yx[0]), float(shift_yx[1])
+        if _verb:
+            print("XCorr residual shift (dtx, dty): ({:.3f}, {:.3f}) px".format(dtx, dty))
+        tx += dtx
+        ty += dty
 
     return scale, tx, ty
 
@@ -1019,6 +1035,7 @@ def main(parser):
     _eight_bit = args.eight_bit
     fft_radius = args.fft_radius[0]
     fov_perc = args.field_of_view[0]
+    _refine_translation = args.refine_translation
 
     if not _skip_preprocessing:
         # create preprocessing folder
@@ -1196,7 +1213,8 @@ def main(parser):
 
     # estimate translation and scale between L_switch_zframe and R_switch_zframe
     print("Evaluating the xy translation and scale factor of Right tomogram respect to left...")
-    right_scale_xy, right_tx, right_ty = estimate_isotropic_scaling_and_translation(L_switch_zframe, R_switch_zframe)
+    right_scale_xy, right_tx, right_ty = estimate_isotropic_scaling_and_translation(L_switch_zframe, R_switch_zframe,
+                                                                                     refine_xcorr=_refine_translation)
     print('Estimated scale factor: {}'.format(right_scale_xy))
     print('Estimated translation (tx, ty)[um]: ({}, {}) um'.format(right_tx * output_voxel_size[2], right_ty * output_voxel_size[2]))
     mess_strings.append(
@@ -1293,4 +1311,7 @@ if __name__ == '__main__':
     parser.add_argument('--fft_radius',
                         type=float, nargs=1, required=False, default=[0.1],
                         help='Radius for SNR evaluation (default: 0.1)')
+    parser.add_argument('-nrt', '--no_refine_translation',
+                        action='store_false', dest='refine_translation', default=True,
+                        help='If passed, skip the sub-pixel phase cross-correlation refinement step (enabled by default)')
     main(parser)
