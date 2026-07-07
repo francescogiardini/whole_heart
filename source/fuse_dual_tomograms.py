@@ -498,6 +498,16 @@ def plot_matches(img1, img2, kp1, kp2, matches, title='Matches'):
 
 
 def estimate_isotropic_scaling_and_translation(img1, img2, _plot_matches=False, plot_inliers_only=True, _verb=False):
+    # OpenCV 4.11+ requires uint8 single-channel — normalize explicitly
+    def _to_uint8(img):
+        img = img.astype(np.float32)
+        lo, hi = img.min(), img.max()
+        if hi > lo:
+            img = (img - lo) / (hi - lo) * 255.0
+        return img.astype(np.uint8)
+    img1 = _to_uint8(img1)
+    img2 = _to_uint8(img2)
+
     # Rileva feature con ORB
     orb = cv2.ORB_create(1000)
     kp1, des1 = orb.detectAndCompute(img1, None)
@@ -1277,8 +1287,8 @@ if __name__ == '__main__':
                         help='Z slicing step for contrast evaluation')
     # add boolean parameter if convert to 8 bit or not
     parser.add_argument('-bit', '--eight_bit',
-                        action='store_true', default=True,
-                        help='Convert to 8 bit')
+                        action='store_true', default=False,
+                        help='If passed, convert to 8 bit')
     # add radius for SNR evaluation
     parser.add_argument('--fft_radius',
                         type=float, nargs=1, required=False, default=[0.1],

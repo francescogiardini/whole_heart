@@ -243,7 +243,7 @@ def create_R(shape_V, shape_P):
 
     if any(shape_V > shape_P):
         # shape
-        shape_R = np.ceil(shape_V / shape_P).astype(np.int)
+        shape_R = np.ceil(shape_V / shape_P).astype(int)
 
         # define empty Results matrix
         total_num_of_cells = np.prod(shape_R)
@@ -360,7 +360,7 @@ def statistics_base(x, w=None, valid_mask=None, invalid_value=None, _verb=False)
         # else, all the values are selected
         if valid_mask is None:
             if invalid_value is None:
-                valid_mask = np.ones_like(x).astype(np.bool)
+                valid_mask = np.ones_like(x).astype(bool)
             else:
                 valid_mask = (x != invalid_value)  # for example, -1
 
