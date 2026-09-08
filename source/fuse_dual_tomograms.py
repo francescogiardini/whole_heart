@@ -1310,7 +1310,7 @@ if __name__ == '__main__':
     # add radius for SNR evaluation
     parser.add_argument('--fft_radius',
                         type=float, nargs=1, required=False, default=[0.1],
-                        help='Radius for SNR evaluation (default: 0.1)')
+                        help='Radius/cla for SNR evaluation (default: 0.1)')
     parser.add_argument('-nrt', '--no_refine_translation',
                         action='store_false', dest='refine_translation', default=True,
                         help='If passed, skip the sub-pixel phase cross-correlation refinement step (enabled by default)')

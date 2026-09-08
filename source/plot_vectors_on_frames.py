@@ -1,4 +1,5 @@
 import numpy as np
+import glob
 import os
 import time
 from PIL import Image
@@ -86,7 +87,7 @@ class Bcolors:
 
 def plot_quiver_2d_for_save(x0_c, x1_c, x0_q, x1_q, img=None, shape=None, origin='upper', title='',
                             color_values='r', scale_units='xy', scale=1., width=2, pivot='middle', real=False,
-                            color_map=None, cmap_image='gray', _show_plot=False):
+                            color_map=None, cmap_image='gray', _show_plot=False, alpha_img=0.9):
     # xc, yc -> array of coordinates of TAIL of the Arrow
     # xq, yq -> array of components of quiver (Head of artow relative to tail)
     # real -> plot quiver with real xy dimension
@@ -99,7 +100,11 @@ def plot_quiver_2d_for_save(x0_c, x1_c, x0_q, x1_q, img=None, shape=None, origin
 
     # plotto tiff sotto i quiver
     if img is not None:
-        plt.imshow(img, origin=origin, cmap=cmap_image, alpha=0.9)
+        # alpha_img < 1 fonde il frame in scala di grigi con lo sfondo bianco della figura,
+        # alzando il livello del "nero" (es. alpha_img=0.9 -> nero puro diventa ~26/255:
+        # 0.9*0 + 0.1*255 = 25.5). alpha_img=1.0 rende l'immagine completamente opaca,
+        # eliminando questo pavimento.
+        plt.imshow(img, origin=origin, cmap=cmap_image, alpha=alpha_img)
         if shape is None:
             shape = img.shape  # shape del frame tiff da plottare sotto i quiver
     else:
@@ -144,7 +149,9 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
                            color_map=cm.plasma, cmap_used='plasma', _blur_color_par=False, _image_white=False,
                            _equalize=False, clip=None,
                            maxPixelValue=100, img_format=IMG_TIFF, ev_index=2, info_to_plot='none', scale=0.07,
-                           _show_plots=True, fa_threshold=None):
+                           _show_plots=True, fa_threshold=None, save_dpi=None, color_by_label='z',
+                           min_mean_intensity=None, z_comp_threshold=None, zb_filter=None, z_amplify=1.0,
+                           alpha_img=0.9, z_color_min=None, z_color_max=None):
     base_path = os.path.join(home_path, acquisition_folder)
     parameter_filepath = os.path.join(base_path, parameter_filename)
 
@@ -183,10 +190,34 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
     print('Dimension of Parallelepiped : {} um'.format(np.array(shape_P) * np.array([res_xy, res_xy, res_z])))
 
     # load R
+    # st_analysis.py incide nel nome della R il valore di fa_threshold e z_boost usati
+    # in fase di CALCOLO (es. "R_<stack>_fa0.30_zb1.50_thr0.99_93um.npy"), che sono
+    # indipendenti dal 'fa_threshold' qui sopra (quello e' solo un filtro di
+    # visualizzazione, passato con -f a QUESTO script). fa/zb usati in fase di calcolo
+    # non sono noti qui, quindi si cercano per wildcard. threshold_on_cell_ratio invece
+    # e' noto (viene letto dallo stesso file -p passato a questo script) e si usa per
+    # restringere il glob: permette di avere piu' R dello stesso stack con soglie
+    # diverse nella stessa cartella (rilanci ripetuti cambiando solo quella soglia)
+    # senza ambiguita' su quale caricare.
     stack_prefix = stack_name.split('.')[0]
-    R_filename = 'R_' + stack_prefix + '_' + str(int(parameters['roi_xy_pix'] * parameters['px_size_xy'])) + 'um.npy'
+    roi_um = str(int(parameters['roi_xy_pix'] * parameters['px_size_xy']))
+    thr_str = '_thr{0:0.2f}'.format(parameters['threshold_on_cell_ratio'])
+    # zb_filter: se piu' R coesistono per lo stesso stack/thr/roi con z_boost diversi
+    # (es. rilanci mirati con -zb diverso su un solo campione), il glob sotto da solo
+    # troverebbe piu' di 1 match; zb_filter permette di pinnare quale caricare.
+    zb_str = '_zb{0:0.2f}'.format(zb_filter) if zb_filter is not None else '*'
+    # wildcard anche fra thr_str e roi_um: i file piu' recenti hanno anche '_z<value>'
+    # (z_comp_threshold) in mezzo, quelli vecchi no - il wildcard copre entrambi i casi
+    R_glob_pattern = 'R_' + stack_prefix + '_fa*' + zb_str + thr_str + '*' + roi_um + 'um.npy'
+    R_matches = sorted(glob.glob(os.path.join(base_path, R_glob_pattern)))
+    if len(R_matches) != 1:
+        raise FileNotFoundError(
+            f"Atteso esattamente 1 file R corrispondente a '{R_glob_pattern}' in "
+            f"{base_path}, trovati {len(R_matches)}: {R_matches}"
+        )
+    R_filepath = R_matches[0]
+    R_filename = os.path.basename(R_filepath)
     print(R_filename)
-    R_filepath = os.path.join(base_path, R_filename)
     R = np.load(R_filepath)
     shape_R = R.shape
     print('shape_R: ', shape_R)
@@ -250,7 +281,21 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
     if fa_threshold is None: # use embedded orient_info in R
         orient_info_bool = R['orient_info']  # R[allR, allrC, Z]["bool_map_of_blocks_with_orient_info"[allR, allC, Z]]
     else: # use FA threshold to extract valid blocks
-        orient_info_bool = R['fa'] > fa_threshold  # R[allR, allrC, Z]["bool_map_of_blocks_where_fa > TH"[allR, allC, Z]]
+        # AND con R['orient_info']: senza questo, un blocco scartato in fase di calcolo
+        # perche' troppo parallelo a Z (np.abs(ev2z) >= z_comp_threshold in st_analysis.py,
+        # probabile artefatto ottico) puo' comunque ricomparire qui solo perche' la sua FA
+        # (calcolata comunque, anche se il blocco e' stato scartato) supera fa_threshold
+        orient_info_bool = (R['fa'] > fa_threshold) & R['orient_info']  # R[allR, allrC, Z]["bool_map_of_blocks_where_fa > TH"[allR, allC, Z]]
+
+    if min_mean_intensity is not None:
+        orient_info_bool = orient_info_bool & (R['mean_intensity'] > min_mean_intensity)
+
+    if z_comp_threshold is not None:
+        # stesso identico check fatto in fase di calcolo (np.abs(ev2z) < z_comp_threshold in
+        # st_analysis.py), ma applicato qui in visualizzazione indipendentemente dalla soglia
+        # usata in fase di calcolo - permette di stringere ulteriormente senza ricalcolare R
+        ev2z = np.abs(R['ev'][..., 2, 2])  # comp. Z del 3o autovettore (orientazione)
+        orient_info_bool = orient_info_bool & (ev2z < z_comp_threshold)
 
     # per ogni z di R, estraggo i cubi validi (utilizzando la mappa booleana orient_info_bool appena generata)
     # e li inserisco in una lista (Rf_z) alla z corrispondente
@@ -344,9 +389,22 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
             color_values = (np.arctan2(yq_z, xq_z) % np.pi)[:]  # [:] because has shape (n_blocks, 1)
             color_values = 2 * np.abs((color_values / color_values.max()) - 0.5)  # simmetric map of angles
         elif color_to_use is COL_ZETA:
-            color_values = normalize(np.abs(zq_z), max_value=1.0, dtype=np.float64)  # norm between [0,1]
+            abs_z = np.abs(zq_z)
+            if z_color_min is not None and z_color_max is not None:
+                # finestra fissa (non il min-max per-slice di normalize()) sul valore fisico
+                # di |z|: mappa [z_color_min, z_color_max] -> [0,1] usando tutto il colormap,
+                # saturando fuori range - a differenza di normalize() questo range e' lo
+                # stesso per tutte le slice/campioni, utile per confronti diretti
+                color_values = np.clip((abs_z - z_color_min) / (z_color_max - z_color_min), 0.0, 1.0)
+            else:
+                color_values = normalize(abs_z, max_value=1.0, dtype=np.float64)  # norm between [0,1]
             # zeta no simmetrica?
             # color_values = 2 * np.abs((color_values / color_values.max()) - 0.5)  # simmetric
+            if z_amplify != 1.0:
+                # amplifica il contrasto quando la componente z e' quasi sempre bassa
+                # (es. z_amplify=3 -> valori bassi diventano piu' visibili), saturando a 1
+                # i valori che superano 1 dopo la moltiplicazione
+                color_values = np.clip(color_values * z_amplify, 0.0, 1.0)
 
         # maps color_values into scalar of 'color_map' matplotlib color map
         colors_2d = float_to_color(values=color_values, color_map=color_map)
@@ -370,7 +428,7 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
                                                     scale_units='xy', scale=scale, pivot='middle',
                                                     real=False, width=width,
                                                     color_map=color_map, cmap_image=cmap_image,
-                                                    _show_plot=_show_plots)
+                                                    _show_plot=_show_plots, alpha_img=alpha_img)
             if _show_plots:
                 mip_plot.show()
 
@@ -419,7 +477,7 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
                                                           scale_units='xy', scale=scale, pivot='middle',
                                                           real=False, width=3,
                                                           color_map=color_map, cmap_image=cmap_image,
-                                                          _show_plot=_show_plots)
+                                                          _show_plot=_show_plots, alpha_img=alpha_img)
 
                 # [if selected] write selected info over the image for every vector
                 if info_to_plot != 'none':
@@ -462,21 +520,47 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
 
                 # saving images?
                 if _save_all_frames or _save_manual_fig or _save_all_R_planes:
-                    quiver_path = os.path.join(base_path, 'quiver_{}_{}_{}_{}'.
-                                               format(info_to_plot, img_format,
-                                                      R_filename.split('.')[0],
-                                                      cmap_used))  # create path where save images
+                    # R_filename senza estensione: splitext (non split('.')) per non troncare
+                    # il valore decimale di fa_threshold nel nome (es. "fa0.00" -> "fa0" col bug vecchio)
+                    R_filename_stem = os.path.splitext(R_filename)[0]
 
-                    # create subfolder with parameters values
-                    if _equalize:
-                        subfolder_name = 'scale{0:0.3f}_clahed{1:0.2f}'.format(scale, clip)
-                    else:
-                        subfolder_name = 'scale{0:0.3f}'.format(scale)
+                    sample_quiver_dir = '{}_quiver'.format(stack_prefix)
+                    inner_folder_name = '{}_{}_quiver_{}_{}_colorby{}_scale{:0.3f}'.format(
+                        stack_prefix, R_filename_stem, info_to_plot, cmap_used, color_by_label, scale)
 
                     if fa_threshold is not None:
-                        subfolder_name = subfolder_name + '_fa{0:0.1f}'.format(fa_threshold)
+                        inner_folder_name = inner_folder_name + '_fa{0:0.2f}'.format(fa_threshold)
 
-                    quiver_path = os.path.join(quiver_path, subfolder_name)
+                    if z_comp_threshold is not None:
+                        inner_folder_name = inner_folder_name + '_zcomp{0:0.2f}'.format(z_comp_threshold)
+
+                    if min_mean_intensity is not None:
+                        inner_folder_name = inner_folder_name + '_meanI{0:0.2f}'.format(min_mean_intensity)
+
+                    if z_amplify != 1.0:
+                        inner_folder_name = inner_folder_name + '_zamp{0:0.2f}'.format(z_amplify)
+
+                    if z_color_min is not None and z_color_max is not None:
+                        inner_folder_name = inner_folder_name + '_zrange{0:0.2f}-{1:0.2f}'.format(
+                            z_color_min, z_color_max)
+
+                    if alpha_img != 0.9:
+                        inner_folder_name = inner_folder_name + '_alpha{0:0.2f}'.format(alpha_img)
+
+                    # clip ha senso solo se l'equalizzazione (CLAHE) e' attiva: senza
+                    # --equalize il parametro --clip viene ignorato dal codice sopra
+                    if _equalize:
+                        inner_folder_name = inner_folder_name + '_clip{0:0.2f}'.format(clip)
+
+                    inner_folder_name = inner_folder_name + '_max{}'.format(maxPixelValue)
+
+                    # dpi effettivo di rendering: se non specificato esplicitamente, matplotlib
+                    # userebbe comunque quello della figura (fig.get_dpi(), tipicamente 100) - lo
+                    # rendiamo esplicito qui per poterlo incidere nel nome cartella
+                    effective_dpi = save_dpi if save_dpi is not None else fig.get_dpi()
+                    inner_folder_name = inner_folder_name + '_dpi{}'.format(int(effective_dpi))
+
+                    quiver_path = os.path.join(base_path, sample_quiver_dir, inner_folder_name)
                     quiver_path = quiver_path + '/'
 
                     # check if it exist
@@ -498,8 +582,13 @@ def plot_vectors_on_frames(home_path='/home', acquisition_folder='', stack_name=
 
                     elif img_format == IMG_TIFF:
                         # (1) save the image in memory in PNG format
+                        # dpi esplicito: di default matplotlib salva alla stessa risoluzione
+                        # nativa usata per calcolare figsize (fig.set_size_inches sopra), cioe'
+                        # 1:1 con i pixel del frame originale, senza oversampling - le linee
+                        # sottili dei quiver risultano quindi pixellate. Un dpi piu' alto qui
+                        # renderizza piu' pixel a parita' di inquadratura, riducendo l'effetto.
                         png1 = BytesIO()
-                        fig.savefig(png1, format='png')
+                        fig.savefig(png1, format='png', dpi=effective_dpi)
                         # (2) load this image into PIL
                         png2 = Image.open(png1)
                         # (3) save as TIFF
@@ -531,11 +620,36 @@ def main(args):
     # manual_z_R_selection = range(1, 65, 3)
     manual_z_R_selection = [0, 1, 2, 3, 4]
 
+    # minimum mean intensity (of the raw block, R['mean_intensity']) to plot a vector
+    min_mean_intensity = args.min_mean_intensity
+
+    # pin which z_boost variant of R to load, if more than one coexists for this stack
+    zb_filter = args.zb
+
+    # max |z-component| of the orientation vector to plot it (excludes near-vertical/optical artifacts)
+    z_comp_threshold = args.z_comp_threshold
+
+    # fattore di amplificazione del colore quando si colora per z (color_by='z'): moltiplica
+    # il valore normalizzato per questo fattore, saturando a 1 - utile quando la componente z
+    # e' quasi sempre bassa e i quiver risultano quasi tutti neri
+    z_amplify = args.z_amplify
+
+    # finestra fissa [z_color_min, z_color_max] sul valore fisico di |z| che usa tutto il
+    # range del colormap (satura fuori range) - se entrambi passati, sostituisce il
+    # min-max per-slice di default (normalize()); combinabile con --z-amplify
+    z_color_min = args.z_color_min
+    z_color_max = args.z_color_max
+
+    # opacita' del frame tiff sotto i quiver: 1.0 = completamente opaco (nero vero, bianco vero);
+    # valori < 1 fondono il frame con lo sfondo bianco della figura, alzando il livello del nero
+    alpha_img = args.alpha_img
+
     # threshold on fractional anisotropy
     fa_threshold = args.fa # threshold on fractional anisotropy
 
     # choice what plot and what color_map
-    color_to_use = COL_ZETA  # COL_XYANGLE, COL_PARAM, COL_ZETA
+    color_by_map = {'z': COL_ZETA, 'fa': COL_PARAM, 'angle': COL_XYANGLE}
+    color_to_use = color_by_map[args.color_by]
     param_for_color = Param.FA  # choice from class Param -> [used only if color_to_use = COL_PARAM]
     color_map, cmap_used = cm.plasma, 'plasma'
     _blur_color_par = False  # gaussian blur on the color matrix
@@ -572,6 +686,10 @@ def main(args):
     # scale = 0.025 # ok per mosaico intero a full resolution
     # scale = 0.050 # ok per mosaico cropped a ds2
     scale = args.scale
+
+    # dpi di rendering/salvataggio del TIFF: None = usa il dpi di default della figura (~100,
+    # nessun oversampling, 1:1 coi pixel del frame originale -> bordi dei quiver pixellati)
+    save_dpi = args.dpi
     # ================================================================================================================
     # =============================== END PARAMETERS =================================================================
     # ================================================================================================================
@@ -600,7 +718,10 @@ def main(args):
                            color_map=color_map, cmap_used=cmap_used, _blur_color_par=_blur_color_par,
                            _image_white=_image_white, _equalize=_equalize,
                            clip=clip, maxPixelValue=maxPixelValue, img_format=img_format, ev_index=ev_index,
-                           info_to_plot=info_to_plot, scale=scale, _show_plots=_show_plots, fa_threshold=fa_threshold)
+                           info_to_plot=info_to_plot, scale=scale, _show_plots=_show_plots, fa_threshold=fa_threshold,
+                           save_dpi=save_dpi, color_by_label=args.color_by, min_mean_intensity=min_mean_intensity,
+                           z_comp_threshold=z_comp_threshold, zb_filter=zb_filter, z_amplify=z_amplify,
+                           alpha_img=alpha_img, z_color_min=z_color_min, z_color_max=z_color_max)
     # #################################################################################################################################
 
     # ------------------------------------------------------- [  B  ]----------------------------------------------------------------
@@ -644,11 +765,70 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Plot vectors on frames.')
     parser.add_argument('-s', '--source_path', type=str, required=True, help='Complete Path of input tiff.')
     parser.add_argument('-p', '--parameter_filename', type=str, required=True, help='Parameter filename.')
-    parser.add_argument('-f', '--fa', type=float, default=None, help='Threshold on Fractional Anisotropy to plot quivers. If not passed, the "orient_info" in R is used.')
-    parser.add_argument('--equalize', action='store_true', default=False, help='Equalize the image.')
-    parser.add_argument('--clip', type=float, default=0.03, help='Clip limit for equalization.')
-    parser.add_argument('--maxPixelValue', type=int, default=150, help='Maximum pixel value for normalization.')
-    parser.add_argument('--ev_index', type=int, default=2, help='Index of eigenvector to plot.')
-    parser.add_argument('--scale', type=float, default=0.07, help='Scale of quiver length.')
+    parser.add_argument('-f', '--fa', type=float, default=None, help='Threshold on Fractional Anisotropy to plot quivers. If not passed, the "orient_info" in R is used. (default: None)')
+    parser.add_argument('--equalize', action='store_true', default=False, help='Equalize the image with CLAHE. Required for --clip to have any effect. (default: False)')
+    parser.add_argument('--clip', type=float, default=0.03, help='Clip limit for CLAHE equalization. Has NO effect unless --equalize is also passed. (default: 0.03)')
+    parser.add_argument('--maxPixelValue', type=int, default=150,
+                        help='Output ceiling (0-255, uint8) for the background frame after min-max stretch. '
+                             'NB: normalize() stretches each frame using its OWN actual min/max, then scales that '
+                             'stretched result into [0, maxPixelValue] - this value is NOT a threshold/clip applied '
+                             'to the raw signal. So HIGHER maxPixelValue = BRIGHTER image (up to 255, the max sane '
+                             'value for uint8); LOWERING it makes the image darker, not brighter. If the frame has '
+                             'few abnormally bright outlier pixels (dust, hot pixels), they can dominate the '
+                             'per-frame max and keep real tissue signal dark regardless of maxPixelValue - use '
+                             '--equalize (CLAHE, local and outlier-robust) instead in that case. (default: 150)')
+    parser.add_argument('--ev_index', type=int, default=2, help='Index of eigenvector to plot (0: max, 2: min). (default: 2)')
+    parser.add_argument('--scale', type=float, default=0.07,
+                        help='Quiver arrow length scale, in matplotlib "data units per arrow length unit". '
+                             'INVERSE relationship: HIGHER scale = SHORTER arrows, LOWER scale = LONGER arrows. '
+                             'E.g. to make arrows ~30%% shorter than the default, use scale/0.7 =~ 0.10, not 0.05. '
+                             '(default: 0.07)')
+    parser.add_argument('--min-mean-intensity', dest='min_mean_intensity', type=float, default=None,
+                        help='Only plot vectors of blocks whose R[\'mean_intensity\'] (raw grayscale mean of the '
+                             'block, saved by st_analysis.py regardless of fa/z filters) is strictly greater than '
+                             'this value. Combines with -f and --color-by. (default: None -> no filtering)')
+    parser.add_argument('--zb', dest='zb', type=float, default=None,
+                        help='Pin which z_boost variant of R to load, if multiple R files coexist for this stack/thr/roi '
+                             '(e.g. after re-running st_analysis.py with a different -zb on the same sample). '
+                             '(default: None -> wildcard, must resolve to exactly 1 file or the script errors out)')
+    parser.add_argument('--z-comp-threshold', dest='z_comp_threshold', type=float, default=None,
+                        help='Only plot vectors whose |z-component| of the orientation eigenvector (R[\'ev\'][...,2,2]) '
+                             'is strictly LESS than this value - i.e. excludes near-vertical vectors (likely optical '
+                             'artifacts / out-of-plane blur), same check as z_comp_threshold at compute time in '
+                             'st_analysis.py, but applied here independently at visualization time (does not require '
+                             're-running st_analysis.py). Combines with -f and --min-mean-intensity. '
+                             '(default: None -> no filtering on this)')
+    parser.add_argument('--color-by', dest='color_by', choices=['z', 'fa', 'angle'], default='z',
+                        help='What the quiver color encodes: "z" = z-component of the orientation vector '
+                             '(default, current behaviour), "fa" = Fractional Anisotropy (R[\'fa\']) of that '
+                             'block, "angle" = in-plane (xy) angle. (default: z)')
+    parser.add_argument('--z-amplify', dest='z_amplify', type=float, default=1.0,
+                        help='Only used when --color-by z (default): multiplies the normalized [0,1] z-component '
+                             'color value by this factor before clipping back to 1 - i.e. it brightens/saturates '
+                             'the colormap toward its high end. Useful when the z-component is almost always low '
+                             'and quivers come out nearly all black/at the low end of the colormap. E.g. 3.0 makes '
+                             'any value >= 1/3 saturate to the top of the colormap. (default: 1.0 -> no change)')
+    parser.add_argument('--z-color-min', dest='z_color_min', type=float, default=None,
+                        help='Only used when --color-by z (default) and combined with --z-color-max: instead of '
+                             'the default per-slice min-max stretch (normalize()), maps the physical |z-component| '
+                             'range [z_color_min, z_color_max] onto the full colormap, clipping values outside '
+                             'that range. Unlike normalize()/--z-amplify this range is the same across every '
+                             'slice/sample, so it is better suited for direct visual comparisons. '
+                             '(default: None -> use normalize() per-slice behaviour)')
+    parser.add_argument('--z-color-max', dest='z_color_max', type=float, default=None,
+                        help='See --z-color-min. Both must be passed together to enable the fixed-range mapping. '
+                             '(default: None -> use normalize() per-slice behaviour)')
+    parser.add_argument('--alpha-img', dest='alpha_img', type=float, default=0.9,
+                        help='Opacity of the grayscale tiff frame plotted under the quivers (matplotlib imshow '
+                             'alpha). Values < 1.0 blend the frame with the figure\'s white background, which '
+                             'raises the effective black level - e.g. 0.9 turns true black (0) into ~26/255 '
+                             '(0.9*0 + 0.1*255 = 25.5). Use 1.0 for a fully opaque frame (true black/white). '
+                             '(default: 0.9, matches historical behaviour)')
+    parser.add_argument('--dpi', type=int, default=None,
+                        help='DPI used to render/save the output TIFF. If not passed, matplotlib uses the figure\'s '
+                             'own default dpi (~100), which is also the dpi used to size the figure 1:1 with the '
+                             'original frame pixels - i.e. no oversampling, so thin quiver lines/edges look '
+                             'pixelated. Pass a higher value (e.g. 200-300) to render more pixels at the same '
+                             'framing and reduce that pixelation. (default: None -> figure\'s own dpi, ~100)')
     args = parser.parse_args()
     main(args)

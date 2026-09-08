@@ -53,7 +53,7 @@ from disarray_tools import estimate_local_disarray, save_in_numpy_file, compile_
     sigma_for_uniform_resolution, downsample_2_zeta_resolution, CONST
 
 
-def block_analysis(parall, shape_P, parameters, sigma, _verbose, fa_threshold, z_comp_threshold):
+def block_analysis(parall, shape_P, parameters, sigma, _verbose, fa_threshold, z_comp_threshold, z_boost=1.0):
     # parall : np.uint8
 
     # initialize empty dictionary and
@@ -100,7 +100,7 @@ def block_analysis(parall, shape_P, parameters, sigma, _verbose, fa_threshold, z
         # - v : ordered eigenvectors
         #       the column v[:,i] is the eigenvector corresponding to the eigenvalue w[i].
         # - shape_parameters : dictionary of shape parameters
-        w, v, shape_parameters = structure_tensor_analysis_3d(parall_down, _rotation=False)
+        w, v, shape_parameters = structure_tensor_analysis_3d(parall_down, _rotation=False, z_boost=z_boost)
 
         # save ordered eigenvectors
         results['ev'] = v
@@ -125,7 +125,7 @@ def block_analysis(parall, shape_P, parameters, sigma, _verbose, fa_threshold, z
     return there_is_cell, there_is_info, results
 
 
-def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbose=False, fa_threshold=0.30, z_comp_threshold=0.975):
+def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbose=False, fa_threshold=0.30, z_comp_threshold=0.975, z_boost=1.0):
     # virtually dissect 'volume', perform on each block the analysis implemented in 'block_analysis',
     # and save the results inside R
 
@@ -174,7 +174,8 @@ def iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbo
                         sigma_blur,
                         _verbose,
                         fa_threshold,
-                        z_comp_threshold)
+                        z_comp_threshold,
+                        z_boost)
 
                     # save info in R[r, c, z]
                     if there_is_cell: R[r, c, z]['cell_info'] = True
@@ -219,8 +220,9 @@ def main(parser):
     _verbose           = args.verbose
     _deep_verbose      = args.deep_verbose
     _plot_quiver       = args.plot_quiver
-    fa_threshold       = args.fa_threshold  # not used in this script
-    z_comp_threshold   = args.z_comp_threshold  # not used in this script
+    fa_threshold       = args.fa_threshold
+    z_comp_threshold   = args.z_comp_threshold
+    z_boost            = args.z_boost
 
     if _verbose:
         print(Bcolors.FAIL + ' *** VERBOSE MODE *** ' + Bcolors.ENDC)
@@ -250,6 +252,7 @@ def main(parser):
     mess_strings.append('  - _deep_verbose {}'.format(_deep_verbose))
     mess_strings.append('  - _plot_quiver {}'.format(_plot_quiver))
     mess_strings.append('  - fa_threshold {}'.format(fa_threshold))
+    mess_strings.append('  - z_boost {}'.format(z_boost))
 
     # extract parameters
     param_names = ['roi_xy_pix',
@@ -297,7 +300,10 @@ def main(parser):
         mess_strings.append(' > ** WARNING: parameters[\'mode_ratio\'] is not recognized: all blacks are not analyzed')
 
     # create result.txt filename:
-    txt_info_filename = 'Orientations_INFO_' + stack_prefix + '_' \
+    # threshold_on_cell_ratio e z_comp_threshold incise nel nome per poter rilanciare
+    # l'analisi piu' volte cambiando solo quelle soglie senza sovrascrivere i risultati precedenti
+    txt_info_filename = 'Orientations_INFO_' + stack_prefix + '_thr{0:0.2f}'.format(parameters['threshold_on_cell_ratio']) \
+                   + '_z{0:0.2f}'.format(z_comp_threshold) + '_' \
                    + str(int(parameters['roi_xy_pix'] * parameters['px_size_xy'])) + 'um.txt'
     txt_info_path = os.path.join(os.path.dirname(source_path), txt_info_filename)
 
@@ -345,7 +351,7 @@ def main(parser):
     R, shape_R = create_R(shape_V, shape_P)
 
     # real analysis on R
-    R, count = iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbose, fa_threshold, z_comp_threshold)
+    R, count = iterate_orientation_analysis(volume, R, parameters, shape_R, shape_P, _verbose, fa_threshold, z_comp_threshold, z_boost)
     mess_strings.append('\n > Orientation analysis completed.')
 
     # extract informations about the data analyzed
@@ -385,7 +391,8 @@ def main(parser):
     # SAVE R in a NUMPY FILES, write info in the 'Orientation_info.txt'
 
     # create result matrix (R) filename:
-    prefix = 'R_' + stack_prefix + '_fa{0:0.2f}'.format(fa_threshold)
+    prefix = 'R_' + stack_prefix + '_fa{0:0.2f}'.format(fa_threshold) + '_zb{0:0.2f}'.format(z_boost) \
+             + '_thr{0:0.2f}'.format(parameters['threshold_on_cell_ratio']) + '_z{0:0.2f}'.format(z_comp_threshold)
     R_filename = prefix + '_' + str(int(parameters['roi_xy_pix'] * parameters['px_size_xy'])) + 'um.npy'
     R_filepath = os.path.join(base_path, process_folder, R_filename)
 
@@ -433,6 +440,9 @@ if __name__ == '__main__':
     # add threshold on the z component of vectors
     my_parser.add_argument('-z', '--z-comp-threshold', type=float, default=0.975, dest='z_comp_threshold',
                            help='threshold on the z component of vectors (default: 0.975)')
+    # add z_boost factor to compensate a weak z gradient
+    my_parser.add_argument('-zb', '--z-boost', type=float, default=1.0, dest='z_boost',
+                           help='fattore moltiplicativo applicato al gradiente lungo z prima del calcolo del structure tensor, per compensare un gradiente z debole (default: 1.0, nessun effetto)')
 
     main(my_parser)
     # ============================================== START  BY TERMINAL ======================================

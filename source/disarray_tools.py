@@ -135,7 +135,7 @@ def turn_in_upper_semisphere(v, axis=1):
     return v_rot
 
 
-def structure_tensor_analysis_3d(vol, _rotation=False):
+def structure_tensor_analysis_3d(vol, _rotation=False, z_boost=1.0):
     # HERE I USE (X, Y, Z) convention
     #
     # Structure Tensor definita così:
@@ -154,9 +154,16 @@ def structure_tensor_analysis_3d(vol, _rotation=False):
     # w[0] > w[1] >...
     # NB : the column v[:,i] is the eigenvector corresponding to the eigenvalue w[i].
     # if _rotation is True, each eigenvector are turned in the 'axis > 0' semisphere
+    # z_boost: fattore moltiplicativo applicato al gradiente lungo z PRIMA del
+    # calcolo del structure tensor. Serve a compensare un bias sistematico verso
+    # l'asse z quando la risoluzione ottica in z e' peggiore di xy: un gradiente
+    # z fisicamente debole sottostima l'autovalore lungo z, facendo scambiare per
+    # "orientazione lungo z" quello che e' solo un artefatto di sfocatura. Con
+    # z_boost=1.0 (default) il comportamento e' identico a prima (nessun effetto).
 
     # Compute Gradient over x y z directions
     gx, gy, gz = np.gradient(vol)
+    gz = gz * z_boost
 
     # compute second order moment of gradient
     Ixx = ndi.gaussian_filter(gx * gx, sigma=1, mode='constant', cval=0)
